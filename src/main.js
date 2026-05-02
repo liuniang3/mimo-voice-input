@@ -464,7 +464,7 @@ function createTray() {
     { label: "Show", click: showWindowOnly },
     { label: "Settings", click: showSettings },
     { label: "Record", click: showAndStart },
-    { label: "Hide", click: hideWindow },
+    { label: "Hide", click: () => hideWindow() },
     { type: "separator" },
     { label: "Quit", click: () => app.quit() }
   ]));
