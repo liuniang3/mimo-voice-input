@@ -127,7 +127,6 @@ node --check src\renderer\renderer.js
 %APPDATA%\mimo-voice-input\mimo.log
 ```
 
-本地日志、`.env`、`node_modules` 和构建产物已经被 Git 忽略。
 
 ## 许可证
 
