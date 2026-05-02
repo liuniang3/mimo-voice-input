@@ -30,6 +30,7 @@ const DEFAULT_SETTINGS = {
 };
 
 let mainWindow;
+let settingsWindow;
 let tray;
 let settings = { ...DEFAULT_SETTINGS };
 let registeredHotkeys = [];
@@ -107,6 +108,31 @@ function createWindow() {
   });
 }
 
+function createSettingsWindow() {
+  settingsWindow = new BrowserWindow({
+    width: WINDOW_SIZES.settings.width,
+    height: WINDOW_SIZES.settings.height,
+    useContentSize: true,
+    show: false,
+    frame: false,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    icon: APP_ICON_PATH,
+    backgroundColor: "#101418",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  settingsWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
+  settingsWindow.on("closed", () => {
+    settingsWindow = null;
+  });
+}
+
 function configurePermissions() {
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(permission === "media");
@@ -116,11 +142,14 @@ function configurePermissions() {
 function showAndStart() {
   if (!mainWindow) return;
   logEvent("hotkey: showAndStart");
+  if (settingsWindow && !settingsWindow.isDestroyed() && settingsWindow.isVisible()) {
+    settingsWindow.hide();
+  }
   targetWindowHandle = getForegroundWindowHandle();
   setWindowMode("recording");
-  prepareWindowForDisplay("recording");
+  prepareWindowForDisplay(mainWindow, "recording");
   mainWindow.show();
-  enforceWindowGeometry("recording");
+  enforceWindowGeometry(mainWindow, "recording");
   focusMainWindow();
   mainWindow.webContents.send("hotkey-record");
 }
@@ -128,55 +157,75 @@ function showAndStart() {
 function showWindowOnly() {
   if (!mainWindow) return;
   setWindowMode("compact");
-  prepareWindowForDisplay("compact");
+  prepareWindowForDisplay(mainWindow, "compact");
   mainWindow.show();
-  enforceWindowGeometry("compact");
+  enforceWindowGeometry(mainWindow, "compact");
   mainWindow.focus();
 }
 
 function showSettings() {
-  if (!mainWindow) return;
+  if (!settingsWindow || settingsWindow.isDestroyed()) {
+    createSettingsWindow();
+  }
+  if (!settingsWindow) return;
   targetWindowHandle = "";
-  setWindowMode("settings");
-  prepareWindowForDisplay("settings");
-  mainWindow.show();
-  enforceWindowGeometry("settings");
-  focusMainWindow();
-  mainWindow.webContents.send("open-settings");
+  logEvent("settings-window: show");
+  prepareWindowForDisplay(settingsWindow, "settings");
+  settingsWindow.show();
+  enforceWindowGeometry(settingsWindow, "settings");
+  focusWindow(settingsWindow, "settings");
+  sendWhenLoaded(settingsWindow, "window-mode", "settings");
+  sendWhenLoaded(settingsWindow, "open-settings");
 }
 
 function setWindowMode(mode) {
   windowMode = mode;
   if (!mainWindow) return;
   logEvent("window: mode", mode);
-  enforceWindowGeometry(mode);
+  enforceWindowGeometry(mainWindow, mode);
   mainWindow.webContents.send("window-mode", mode);
 }
 
-function enforceWindowGeometry(mode = windowMode) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+function enforceWindowGeometry(win, mode = windowMode) {
+  if (!win || win.isDestroyed()) return;
   const size = WINDOW_SIZES[mode] || WINDOW_SIZES.compact;
-  mainWindow.setMinimumSize(1, 1);
-  mainWindow.setContentSize(size.width, size.height, false);
-  mainWindow.setBounds({ ...mainWindow.getBounds(), width: size.width, height: size.height }, false);
+  win.setMinimumSize(1, 1);
+  win.setContentSize(size.width, size.height, false);
+  win.setBounds({ ...win.getBounds(), width: size.width, height: size.height }, false);
+  logEvent("window: geometry", `${mode} ${JSON.stringify(win.getBounds())}`);
 }
 
-function prepareWindowForDisplay(mode = windowMode) {
-  if (mainWindow.isMinimized()) {
-    mainWindow.restore();
+function prepareWindowForDisplay(win = mainWindow, mode = windowMode) {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) {
+    win.restore();
   }
-  enforceWindowGeometry(mode);
-  mainWindow.setFocusable(true);
-  mainWindow.setAlwaysOnTop(true);
-  mainWindow.center();
-  mainWindow.moveTop();
+  enforceWindowGeometry(win, mode);
+  win.setFocusable(true);
+  win.setAlwaysOnTop(true);
+  win.center();
+  win.moveTop();
 }
 
-function hideWindow() {
-  if (mainWindow) {
+function hideWindow(win = mainWindow) {
+  if (!win || win.isDestroyed()) return;
+  if (win === mainWindow) {
     setWindowMode("compact");
-    mainWindow.hide();
   }
+  win.hide();
+}
+
+function sendWhenLoaded(win, channel, ...args) {
+  if (!win || win.isDestroyed()) return;
+  if (!win.webContents.isLoading()) {
+    win.webContents.send(channel, ...args);
+    return;
+  }
+  win.webContents.once("did-finish-load", () => {
+    if (!win.isDestroyed()) {
+      win.webContents.send(channel, ...args);
+    }
+  });
 }
 
 function hotkeyCandidates() {
@@ -186,15 +235,20 @@ function hotkeyCandidates() {
 
 function focusMainWindow() {
   if (!mainWindow) return;
-  logEvent("window: focus requested");
-  mainWindow.show();
-  mainWindow.moveTop();
-  mainWindow.focus();
+  focusWindow(mainWindow, "main");
+}
+
+function focusWindow(win, label) {
+  if (!win || win.isDestroyed()) return;
+  logEvent("window: focus requested", label);
+  win.show();
+  win.moveTop();
+  win.focus();
   setTimeout(() => {
-    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
-    mainWindow.moveTop();
-    mainWindow.focus();
-    logEvent("window: focus retry", `focused=${mainWindow.isFocused()}`);
+    if (!win || win.isDestroyed() || !win.isVisible()) return;
+    win.moveTop();
+    win.focus();
+    logEvent("window: focus retry", `${label} focused=${win.isFocused()}`);
   }, 120);
 }
 
@@ -671,9 +725,12 @@ public static class Win32 {
 ipcMain.handle("settings:get", async () => settings);
 ipcMain.handle("settings:save", async (_event, nextSettings) => saveSettings(nextSettings));
 ipcMain.handle("window:compact", async (_event, isCompact) => {
-  if (!mainWindow) return;
-  setWindowMode(isCompact ? "compact" : "settings");
-  mainWindow.center();
+  if (isCompact) {
+    setWindowMode("compact");
+    mainWindow?.center();
+  } else {
+    showSettings();
+  }
 });
 ipcMain.handle("window:settings", async () => showSettings());
 ipcMain.handle("app:status", async () => ({
@@ -687,7 +744,7 @@ ipcMain.handle("app:status", async () => ({
   platform: os.platform(),
   settings
 }));
-ipcMain.handle("window:hide", async () => hideWindow());
+ipcMain.handle("window:hide", async (event) => hideWindow(BrowserWindow.fromWebContents(event.sender) || mainWindow));
 ipcMain.handle("app:log", async (_event, message, detail) => logEvent(`renderer: ${message}`, detail || ""));
 ipcMain.handle("mimo:transcribe", async (_event, payload) => callMimo(payload));
 ipcMain.handle("input:inject", async (_event, text) => injectText(text));
