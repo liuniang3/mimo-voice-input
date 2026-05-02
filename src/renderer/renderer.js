@@ -21,8 +21,11 @@ const apiKeyInput = document.getElementById("apiKeyInput");
 const baseUrlInput = document.getElementById("baseUrlInput");
 const hotkeyInput = document.getElementById("hotkeyInput");
 const hotkeyHint = document.getElementById("hotkeyHint");
-const transcriptionModeSelect = document.getElementById("transcriptionModeSelect");
+const stableModeBtn = document.getElementById("stableModeBtn");
+const fastModeBtn = document.getElementById("fastModeBtn");
 const clearApiKeyBtn = document.getElementById("clearApiKeyBtn");
+
+const TRANSCRIPTION_MODES = new Set(["stable", "fast"]);
 
 let audioContext;
 let sourceNode;
@@ -41,6 +44,11 @@ let appSettings = {};
 let autoSendAfterTranscript = false;
 let currentWindowMode = "compact";
 let hotkeyCaptureOriginalValue = "";
+let recordingTranscriptionMode = "stable";
+
+function normalizeTranscriptionMode(mode) {
+  return TRANSCRIPTION_MODES.has(mode) ? mode : "stable";
+}
 
 function logRenderer(message, detail = "") {
   window.mimoInput?.log?.(message, detail).catch(() => {});
@@ -87,7 +95,13 @@ async function refreshStatus() {
 async function startRecording({ autoSend = true } = {}) {
   if (isRecording) return;
   logRenderer("recording: start requested", `autoSend=${autoSend}`);
+  try {
+    await refreshStatus();
+  } catch (error) {
+    logRenderer("settings: refresh before recording failed", error.message || String(error));
+  }
   autoSendAfterTranscript = autoSend;
+  recordingTranscriptionMode = normalizeTranscriptionMode(appSettings.transcriptionMode);
   resultText.value = "";
   setButtons("recording");
   setStatus("recording", "Recording", "");
@@ -145,7 +159,8 @@ async function stopRecording() {
   logRenderer("recording: stop requested");
   isRecording = false;
   setButtons("transcribing");
-  const modeDetail = appSettings.transcriptionMode === "fast"
+  const transcriptionMode = normalizeTranscriptionMode(recordingTranscriptionMode);
+  const modeDetail = transcriptionMode === "fast"
     ? "MiMo is transcribing in fast mode."
     : "MiMo is transcribing, then cleaning the text.";
   setStatus("transcribing", "Transcribing", modeDetail);
@@ -179,7 +194,8 @@ async function stopRecording() {
     logRenderer("mimo: transcribe start", `bytes=${wavBytes.byteLength}`);
     const transcript = await window.mimoInput.transcribe({
       audioDataUrl,
-      shortContext: buildShortContext()
+      shortContext: buildShortContext(),
+      transcriptionMode
     });
     resultText.value = transcript;
     logRenderer("mimo: transcribe done", `chars=${transcript.length}`);
@@ -459,7 +475,27 @@ function fillSettingsForm(status) {
     : "Paste MiMo API key or token plan key";
   baseUrlInput.value = appSettings.baseUrl || "";
   hotkeyInput.value = appSettings.hotkey || "CommandOrControl+Alt+M";
-  transcriptionModeSelect.value = appSettings.transcriptionMode || "stable";
+  renderTranscriptionMode(normalizeTranscriptionMode(appSettings.transcriptionMode));
+}
+
+function renderTranscriptionMode(mode) {
+  for (const button of [stableModeBtn, fastModeBtn]) {
+    const active = button.dataset.mode === mode;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+}
+
+async function setTranscriptionMode(mode) {
+  const transcriptionMode = normalizeTranscriptionMode(mode);
+  renderTranscriptionMode(transcriptionMode);
+  appSettings = await window.mimoInput.saveSettings({ transcriptionMode });
+  renderTranscriptionMode(normalizeTranscriptionMode(appSettings.transcriptionMode));
+  setStatus(
+    "ready",
+    "Settings saved",
+    transcriptionMode === "fast" ? "Fast mode uses one MiMo call." : "Stable mode uses two isolated MiMo steps."
+  );
 }
 
 function applyWindowMode(mode) {
@@ -477,7 +513,7 @@ async function saveAllSettings() {
     baseUrl: baseUrlInput.value.trim(),
     hotkey: hotkeyInput.value.trim() || "CommandOrControl+Alt+M",
     microphoneDeviceId: microphoneSelect.value,
-    transcriptionMode: transcriptionModeSelect.value
+    transcriptionMode: normalizeTranscriptionMode(appSettings.transcriptionMode)
   });
   await refreshStatus();
   setStatus("ready", "Settings saved", "API, URL, hotkey, and microphone settings were updated.");
@@ -553,16 +589,8 @@ settingsBtn.addEventListener("click", async () => {
 });
 refreshDevicesBtn.addEventListener("click", () => refreshMicrophones({ requestPermission: true }));
 microphoneSelect.addEventListener("change", saveMicrophoneSelection);
-transcriptionModeSelect.addEventListener("change", async () => {
-  appSettings = await window.mimoInput.saveSettings({
-    transcriptionMode: transcriptionModeSelect.value
-  });
-  setStatus(
-    "ready",
-    "Settings saved",
-    transcriptionModeSelect.value === "fast" ? "Fast mode uses one MiMo call." : "Stable mode uses two MiMo calls."
-  );
-});
+stableModeBtn.addEventListener("click", () => setTranscriptionMode("stable"));
+fastModeBtn.addEventListener("click", () => setTranscriptionMode("fast"));
 saveSettingsBtn.addEventListener("click", saveAllSettings);
 clearApiKeyBtn.addEventListener("click", async () => {
   apiKeyInput.value = "";

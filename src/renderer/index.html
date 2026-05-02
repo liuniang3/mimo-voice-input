@@ -60,13 +60,19 @@
           </select>
           <small id="microphoneHint" class="microphone-hint">Actual input source will be shown while recording.</small>
         </label>
-        <label class="field">
+        <fieldset class="field mode-field">
           <span>Transcription mode</span>
-          <select id="transcriptionModeSelect">
-            <option value="stable">Stable: raw transcript, then cleanup</option>
-            <option value="fast">Fast: one MiMo call</option>
-          </select>
-        </label>
+          <div class="mode-toggle" role="group" aria-label="Transcription mode">
+            <button id="stableModeBtn" type="button" class="mode-button" data-mode="stable">
+              <strong>Stable</strong>
+              <span>Two-step cleanup</span>
+            </button>
+            <button id="fastModeBtn" type="button" class="mode-button" data-mode="fast">
+              <strong>Fast</strong>
+              <span>One MiMo call</span>
+            </button>
+          </div>
+        </fieldset>
         <div class="settings-actions">
           <button id="refreshDevicesBtn">Refresh microphones</button>
           <button id="clearApiKeyBtn">Use environment key</button>

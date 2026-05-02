@@ -77,10 +77,15 @@ async function loadSettings() {
 
 async function saveSettings(nextSettings) {
   settings = { ...settings, ...nextSettings };
+  settings.transcriptionMode = normalizeTranscriptionMode(settings.transcriptionMode);
   await fs.mkdir(app.getPath("userData"), { recursive: true });
   await fs.writeFile(settingsPath(), JSON.stringify(settings, null, 2), "utf8");
   await registerHotkey();
   return settings;
+}
+
+function normalizeTranscriptionMode(mode) {
+  return mode === "fast" ? "fast" : "stable";
 }
 
 function createWindow() {
@@ -615,29 +620,38 @@ function responseText(response, { allowReasoningFallback = false } = {}) {
   return allowReasoningFallback ? response.reasoningContent : "";
 }
 
-async function callMimo({ audioDataUrl, shortContext }) {
-  if (settings.transcriptionMode === "fast") {
-    const response = await requestMimoChat([
-      { role: "system", content: buildSystemPrompt() },
-      {
-        role: "user",
-        content: [
-          {
-            type: "input_audio",
-            input_audio: {
-              data: audioDataUrl
-            }
-          },
-          {
-            type: "text",
-            text: buildUserInstruction(shortContext)
-          }
-        ]
-      }
-    ]);
-    return cleanTranscript(responseText(response, { allowReasoningFallback: true }));
+async function callMimo({ audioDataUrl, shortContext, transcriptionMode }) {
+  const mode = normalizeTranscriptionMode(transcriptionMode || settings.transcriptionMode);
+  logEvent("mimo: mode", mode);
+  if (mode === "fast") {
+    return callMimoFast({ audioDataUrl, shortContext });
   }
+  return callMimoStable({ audioDataUrl, shortContext });
+}
 
+async function callMimoFast({ audioDataUrl, shortContext }) {
+  const response = await requestMimoChat([
+    { role: "system", content: buildSystemPrompt() },
+    {
+      role: "user",
+      content: [
+        {
+          type: "input_audio",
+          input_audio: {
+            data: audioDataUrl
+          }
+        },
+        {
+          type: "text",
+          text: buildUserInstruction(shortContext)
+        }
+      ]
+    }
+  ]);
+  return cleanTranscript(responseText(response, { allowReasoningFallback: true }));
+}
+
+async function callMimoStable({ audioDataUrl, shortContext }) {
   const rawAudioResponse = await requestMimoChat([
     { role: "system", content: buildRawTranscriptionSystemPrompt() },
     {
