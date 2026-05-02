@@ -1,8 +1,8 @@
-# 基于小米 MiMo V2.5 的语音输入法
+# MiMo Voice Input
 
 Windows voice input assistant powered by Xiaomi MiMo V2.5 multimodal API.
 
-基于小米 MiMo V2.5 的语音输入法 is an Electron MVP for global dictation on Windows. It is not a Windows IME driver. It records a short voice clip, sends the audio to MiMo, cleans the transcript, writes the result to the clipboard, and pastes it into the previously focused app.
+MiMo Voice Input is an Electron MVP for global dictation on Windows. It is not a Windows IME driver. It records a short voice clip, sends the audio to MiMo, cleans the transcript, writes the result to the clipboard, and pastes it into the previously focused app.
 
 Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
 
