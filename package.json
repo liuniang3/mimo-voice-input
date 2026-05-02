@@ -1,5 +1,6 @@
 {
   "name": "mimo-voice-input",
+  "productName": "基于小米 MiMo V2.5 的语音输入法",
   "version": "0.1.0",
   "description": "Windows voice input assistant powered by Xiaomi MiMo multimodal API.",
   "main": "src/main.js",

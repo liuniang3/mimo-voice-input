@@ -8,8 +8,14 @@ const { cleanTranscript } = require("./transcript-cleaner");
 const APP_ICON_PATH = path.join(__dirname, "..", "assets", "mimo-icon.ico");
 const TRAY_ICON_PATH = path.join(__dirname, "..", "assets", "mimo-tray.png");
 const HOTKEY_HELPER_PATH = path.join(__dirname, "win-hotkey-helper.ps1");
+const APP_DISPLAY_NAME = "基于小米 MiMo V2.5 的语音输入法";
 const FALLBACK_TRAY_ICON_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+const WINDOW_SIZES = {
+  recording: { width: 220, height: 74 },
+  compact: { width: 220, height: 74 },
+  settings: { width: 500, height: 620 }
+};
 
 const DEFAULT_SETTINGS = {
   hotkey: "CommandOrControl+Alt+M",
@@ -78,8 +84,9 @@ async function saveSettings(nextSettings) {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 220,
-    height: 74,
+    width: WINDOW_SIZES.compact.width,
+    height: WINDOW_SIZES.compact.height,
+    useContentSize: true,
     show: false,
     frame: false,
     alwaysOnTop: true,
@@ -111,8 +118,9 @@ function showAndStart() {
   logEvent("hotkey: showAndStart");
   targetWindowHandle = getForegroundWindowHandle();
   setWindowMode("recording");
-  prepareWindowForDisplay();
+  prepareWindowForDisplay("recording");
   mainWindow.show();
+  enforceWindowGeometry("recording");
   focusMainWindow();
   mainWindow.webContents.send("hotkey-record");
 }
@@ -120,8 +128,9 @@ function showAndStart() {
 function showWindowOnly() {
   if (!mainWindow) return;
   setWindowMode("compact");
-  prepareWindowForDisplay();
+  prepareWindowForDisplay("compact");
   mainWindow.show();
+  enforceWindowGeometry("compact");
   mainWindow.focus();
 }
 
@@ -129,8 +138,9 @@ function showSettings() {
   if (!mainWindow) return;
   targetWindowHandle = "";
   setWindowMode("settings");
-  prepareWindowForDisplay();
+  prepareWindowForDisplay("settings");
   mainWindow.show();
+  enforceWindowGeometry("settings");
   focusMainWindow();
   mainWindow.webContents.send("open-settings");
 }
@@ -139,20 +149,23 @@ function setWindowMode(mode) {
   windowMode = mode;
   if (!mainWindow) return;
   logEvent("window: mode", mode);
-  const sizes = {
-    recording: [220, 74],
-    compact: [220, 74],
-    settings: [500, 620]
-  };
-  const [width, height] = sizes[mode] || sizes.compact;
-  mainWindow.setSize(width, height);
+  enforceWindowGeometry(mode);
   mainWindow.webContents.send("window-mode", mode);
 }
 
-function prepareWindowForDisplay() {
+function enforceWindowGeometry(mode = windowMode) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const size = WINDOW_SIZES[mode] || WINDOW_SIZES.compact;
+  mainWindow.setMinimumSize(1, 1);
+  mainWindow.setContentSize(size.width, size.height, false);
+  mainWindow.setBounds({ ...mainWindow.getBounds(), width: size.width, height: size.height }, false);
+}
+
+function prepareWindowForDisplay(mode = windowMode) {
   if (mainWindow.isMinimized()) {
     mainWindow.restore();
   }
+  enforceWindowGeometry(mode);
   mainWindow.setFocusable(true);
   mainWindow.setAlwaysOnTop(true);
   mainWindow.center();
@@ -161,6 +174,7 @@ function prepareWindowForDisplay() {
 
 function hideWindow() {
   if (mainWindow) {
+    setWindowMode("compact");
     mainWindow.hide();
   }
 }
@@ -391,7 +405,7 @@ function createTray() {
     image = nativeImage.createFromDataURL(FALLBACK_TRAY_ICON_DATA_URL);
   }
   tray = new Tray(image);
-  tray.setToolTip("MiMo Voice Input");
+  tray.setToolTip(APP_DISPLAY_NAME);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "Show", click: showWindowOnly },
     { label: "Settings", click: showSettings },
