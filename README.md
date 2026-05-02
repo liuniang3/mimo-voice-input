@@ -4,6 +4,8 @@ Windows voice input assistant powered by Xiaomi MiMo multimodal API.
 
 MiMo Voice Input is an Electron MVP for global dictation on Windows. It is not a Windows IME driver. It records a short voice clip, sends the audio to MiMo, cleans the transcript, writes the result to the clipboard, and pastes it into the previously focused app.
 
+Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
+
 ## Features
 
 - Global hotkey recording
@@ -116,9 +118,14 @@ Local logs, `.env`, `node_modules`, and build outputs are ignored by Git.
 
 ## Known Limits
 
-- MiMo multimodal chat is not a dedicated ASR endpoint, so occasional non-transcription responses can still happen.
-- The app uses clipboard paste rather than a real IME driver.
-- Focus restoration can vary by target application and Windows security policy.
+- This is not a real Windows IME driver. It pastes text through the clipboard and may be blocked or delayed by some target apps.
+- MiMo multimodal chat is not a dedicated ASR endpoint, so occasional non-transcription responses, hallucinated explanations, or missed punctuation can still happen.
+- `Stable` mode improves reliability by using two MiMo calls, but it increases latency and API cost.
+- Focus restoration and paste behavior can vary by target application, elevated windows, remote desktops, browser security behavior, and Windows input policy.
+- Audio is uploaded to the configured API endpoint. Privacy depends on the provider, account, and endpoint selected by the user.
+- Microphone selection depends on Windows device names and Electron audio capture behavior; some devices may need manual selection or app restart.
+- Filler-word and repetition cleanup is partly heuristic. It may miss some fillers or remove words that were intentionally repeated.
+- There is no packaged installer, auto-update flow, or code-signing setup yet. Running from source currently requires Node.js, npm, and the Electron dependency set.
 
 ## License
 
