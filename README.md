@@ -16,10 +16,20 @@ Thanks to Xiaomi MiMo and the MiMo trillion-token plan for making it easier for 
 - Small floating recording indicator
 - Tray menu for settings
 - Configurable API key, base URL, hotkey, microphone, and transcription mode
+- Two explicit transcription mode buttons in settings: `Stable` and `Fast`
 - Token Plan URL auto-selection for `tp-` keys
 - Clipboard paste into the previous focused app
 - Stable two-step transcription mode
 - Local cleanup for common filler words and prompt-leak style outputs
+
+## Latest Update
+
+The settings panel now uses two dedicated buttons for transcription mode control:
+
+- `Stable`: two isolated MiMo steps. The first call performs raw audio transcription, and the second call cleans the plain text.
+- `Fast`: one MiMo call for lower latency.
+
+Mode switching is isolated per recording session. When a recording starts, the app refreshes the latest saved settings and locks the selected transcription mode for that recording. Changing the mode while a recording is already being processed will only affect the next recording, not the current one. The main process also keeps the two mode paths separate as `callMimoStable()` and `callMimoFast()` so future prompt or error-handling changes can be made without accidentally mixing the two behaviors.
 
 ## Install
 
@@ -87,12 +97,16 @@ Default global hotkey: `Ctrl+Alt+M`. After setting a custom hotkey, only that cu
 
 ## Transcription Modes
 
+The settings panel provides two mode buttons.
+
 `Stable` is the default. It calls MiMo twice:
 
 1. Raw audio transcription
 2. Plain-text cleanup for filler words, repeated fragments, and punctuation
 
 `Fast` uses one MiMo call. It is lower latency, but it is more likely to produce non-transcription text when the audio is ambiguous.
+
+Each recording uses a mode snapshot captured at recording start, so the current recording cannot be affected by later mode changes.
 
 ## Privacy
 
