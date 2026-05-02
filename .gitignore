@@ -1,0 +1,17 @@
+node_modules/
+dist/
+out/
+.vite/
+*.log
+.env
+.env.*
+!.env.example
+recordings/
+tmp/
+*.tmp
+*.bak
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.local

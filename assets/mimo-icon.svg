@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">MiMo Voice Input icon</title>
+  <desc id="desc">A microphone, text cursor, and speech wave mark for MiMo Voice Input.</desc>
+  <defs>
+    <linearGradient id="voice" x1="64" y1="32" x2="192" y2="224" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38d5ff"/>
+      <stop offset="0.56" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect x="34" y="18" width="188" height="220" rx="44" fill="#111827"/>
+  <path d="M102 68c0-17.7 11.6-30 26-30s26 12.3 26 30v50c0 17.7-11.6 30-26 30s-26-12.3-26-30V68Z" fill="url(#voice)"/>
+  <path d="M116 67c0-8.9 4.8-14 12-14s12 5.1 12 14v50c0 8.9-4.8 14-12 14s-12-5.1-12-14V67Z" fill="#f8fafc" opacity=".18"/>
+  <path d="M82 112c0 28.2 18.8 48 46 48s46-19.8 46-48" fill="none" stroke="#f8fafc" stroke-width="16" stroke-linecap="round"/>
+  <path d="M128 160v42" fill="none" stroke="#38d5ff" stroke-width="16" stroke-linecap="round"/>
+  <path d="M104 202h48" fill="none" stroke="#38d5ff" stroke-width="16" stroke-linecap="round"/>
+  <path d="M73 75c-13 15-20 33-20 53s7 38 20 53" fill="none" stroke="#38d5ff" stroke-width="14" stroke-linecap="round"/>
+  <path d="M183 75c13 15 20 33 20 53s-7 38-20 53" fill="none" stroke="#38d5ff" stroke-width="14" stroke-linecap="round"/>
+  <path d="M83 96c-6 9-9 20-9 32s3 23 9 32" fill="none" stroke="#2563eb" stroke-width="12" stroke-linecap="round"/>
+  <path d="M173 96c6 9 9 20 9 32s-3 23-9 32" fill="none" stroke="#2563eb" stroke-width="12" stroke-linecap="round"/>
+</svg>

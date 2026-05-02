@@ -1,0 +1,23 @@
+{
+  "name": "mimo-voice-input",
+  "version": "0.1.0",
+  "description": "Windows voice input assistant powered by Xiaomi MiMo multimodal API.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "check": "node scripts/check-config.js",
+    "test:clean": "node scripts/test-clean-transcript.js"
+  },
+  "keywords": [
+    "mimo",
+    "voice-input",
+    "dictation",
+    "windows"
+  ],
+  "author": "",
+  "license": "MIT",
+  "private": true,
+  "devDependencies": {
+    "electron": "^39.2.6"
+  }
+}

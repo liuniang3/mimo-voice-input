@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MiMo Voice Input</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>MiMo Voice Input</h1>
+          <p id="apiState">Checking API key...</p>
+        </div>
+        <div class="window-actions">
+          <button id="settingsBtn" class="icon-btn" title="Settings">⚙</button>
+          <button id="closeBtn" class="icon-btn" title="Hide">×</button>
+        </div>
+      </header>
+
+      <section class="status-panel" id="statusPanel">
+        <div id="pulse" class="pulse"></div>
+        <div>
+          <strong id="statusTitle">Ready</strong>
+          <span id="statusDetail">Press the configured hotkey to record.</span>
+          <div id="levelMeter" class="level-meter" hidden>
+            <div id="levelFill"></div>
+          </div>
+        </div>
+      </section>
+
+      <label class="field advanced-field">
+        <span>Short context</span>
+        <input id="contextInput" type="text" placeholder="Optional app/window context or custom words" />
+      </label>
+
+      <section id="settingsPanel" class="settings-panel" hidden>
+        <div class="settings-head">
+          <strong>Settings</strong>
+          <button id="saveSettingsBtn">Save</button>
+        </div>
+        <label class="field">
+          <span>API Key</span>
+          <input id="apiKeyInput" type="password" placeholder="Leave empty to use MIMO_API_KEY environment variable" />
+        </label>
+        <label class="field">
+          <span>Base URL</span>
+          <input id="baseUrlInput" type="text" placeholder="Auto, or https://token-plan-cn.xiaomimimo.com/v1" />
+        </label>
+        <label class="field">
+          <span>Global hotkey</span>
+          <input id="hotkeyInput" type="text" placeholder="CommandOrControl+Alt+M" autocomplete="off" />
+          <small id="hotkeyHint" class="hotkey-hint" hidden>按下新的快捷键组合</small>
+        </label>
+        <label class="field">
+          <span>Microphone</span>
+          <select id="microphoneSelect">
+            <option value="">System default microphone</option>
+          </select>
+          <small id="microphoneHint" class="microphone-hint">Actual input source will be shown while recording.</small>
+        </label>
+        <label class="field">
+          <span>Transcription mode</span>
+          <select id="transcriptionModeSelect">
+            <option value="stable">Stable: raw transcript, then cleanup</option>
+            <option value="fast">Fast: one MiMo call</option>
+          </select>
+        </label>
+        <div class="settings-actions">
+          <button id="refreshDevicesBtn">Refresh microphones</button>
+          <button id="clearApiKeyBtn">Use environment key</button>
+        </div>
+      </section>
+
+      <label class="field result-field advanced-field">
+        <span>Result</span>
+        <textarea id="resultText" placeholder="Transcript will appear here"></textarea>
+      </label>
+
+      <div class="actions advanced-field">
+        <button id="recordBtn" class="primary">Record</button>
+        <button id="stopBtn" disabled>Stop</button>
+        <button id="sendBtn" disabled>Send</button>
+      </div>
+
+      <footer>
+        <span>Enter stops recording</span>
+        <span>Ctrl+Enter sends</span>
+        <span>Esc hides</span>
+      </footer>
+    </main>
+    <script src="./renderer.js"></script>
+  </body>
+</html>
