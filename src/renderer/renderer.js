@@ -39,12 +39,12 @@ let recordingRmsSum = 0;
 let recordingSampleCount = 0;
 let silenceGainNode;
 let isRecording = false;
-let lastTranscript = "";
 let appSettings = {};
 let autoSendAfterTranscript = false;
 let currentWindowMode = "compact";
 let hotkeyCaptureOriginalValue = "";
 let recordingTranscriptionMode = "stable";
+let recordingShortContext = "";
 
 function normalizeTranscriptionMode(mode) {
   return TRANSCRIPTION_MODES.has(mode) ? mode : "stable";
@@ -102,6 +102,7 @@ async function startRecording({ autoSend = true } = {}) {
   }
   autoSendAfterTranscript = autoSend;
   recordingTranscriptionMode = normalizeTranscriptionMode(appSettings.transcriptionMode);
+  recordingShortContext = buildShortContext();
   resultText.value = "";
   setButtons("recording");
   setStatus("recording", "Recording", "");
@@ -194,12 +195,11 @@ async function stopRecording() {
     logRenderer("mimo: transcribe start", `bytes=${wavBytes.byteLength}`);
     const transcript = await window.mimoInput.transcribe({
       audioDataUrl,
-      shortContext: buildShortContext(),
+      shortContext: recordingShortContext,
       transcriptionMode
     });
     resultText.value = transcript;
     logRenderer("mimo: transcribe done", `chars=${transcript.length}`);
-    lastTranscript = transcript;
     if (transcript) {
       if (autoSendAfterTranscript) {
       setStatus("transcribing", "Sending", "Pasting into the previous focused app.");
@@ -215,6 +215,8 @@ async function stopRecording() {
     logRenderer("mimo: transcribe failed", error.message || String(error));
     setStatus("error", "Request failed", error.message || String(error));
   } finally {
+    recordingChunks = [];
+    recordingShortContext = "";
     setButtons("ready");
   }
 }
