@@ -159,6 +159,7 @@ async function stopRecording() {
   if (!isRecording) return;
   logRenderer("recording: stop requested");
   isRecording = false;
+  await window.mimoInput.clearRecordingKeys();
   setButtons("transcribing");
   const transcriptionMode = normalizeTranscriptionMode(recordingTranscriptionMode);
   const modeDetail = transcriptionMode === "fast"
@@ -222,6 +223,7 @@ async function stopRecording() {
 }
 
 async function cancelRecording() {
+  await window.mimoInput.clearRecordingKeys();
   if (!isRecording) {
     await window.mimoInput.hide();
     return;
@@ -629,6 +631,15 @@ window.mimoInput.onHotkeyRecord(() => {
     setStatus("error", "Microphone failed", error.message || String(error));
     setButtons("ready");
   });
+});
+
+window.mimoInput.onRecordingCommand((command) => {
+  logRenderer("event: recording-command", command);
+  if (command === "stop") {
+    stopRecording();
+  } else if (command === "cancel") {
+    cancelRecording();
+  }
 });
 
 window.mimoInput.onOpenSettings(async () => {

@@ -38,6 +38,7 @@ let failedHotkeys = [];
 let hotkeyHelperProcess = null;
 let windowMode = "compact";
 let targetWindowHandle = "";
+let recordingKeyFallbacksActive = false;
 const singleInstanceLock = app.requestSingleInstanceLock();
 
 function logEvent(message, detail = "") {
@@ -156,6 +157,7 @@ function showAndStart() {
   mainWindow.show();
   enforceWindowGeometry(mainWindow, "recording");
   focusMainWindow();
+  registerRecordingKeyFallbacks();
   mainWindow.webContents.send("hotkey-record");
 }
 
@@ -216,6 +218,7 @@ function hideWindow(win = mainWindow) {
   if (!win || win.isDestroyed()) return;
   if (win === mainWindow) {
     setWindowMode("compact");
+    unregisterRecordingKeyFallbacks();
   }
   win.hide();
 }
@@ -249,12 +252,50 @@ function focusWindow(win, label) {
   win.show();
   win.moveTop();
   win.focus();
-  setTimeout(() => {
-    if (!win || win.isDestroyed() || !win.isVisible()) return;
-    win.moveTop();
-    win.focus();
-    logEvent("window: focus retry", `${label} focused=${win.isFocused()}`);
-  }, 120);
+  for (const delay of [80, 180, 360]) {
+    setTimeout(() => {
+      if (!win || win.isDestroyed() || !win.isVisible()) return;
+      win.moveTop();
+      win.focus();
+      logEvent("window: focus retry", `${label} delay=${delay} focused=${win.isFocused()}`);
+    }, delay);
+  }
+}
+
+function registerRecordingKeyFallbacks() {
+  if (recordingKeyFallbacksActive) return;
+  const bindings = [
+    ["Enter", "stop"],
+    ["Esc", "cancel"],
+    ["Escape", "cancel"],
+    ["Backspace", "cancel"],
+    ["Delete", "cancel"]
+  ];
+  let registeredCount = 0;
+  for (const [accelerator, command] of bindings) {
+    try {
+      const ok = globalShortcut.register(accelerator, () => {
+        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && windowMode === "recording") {
+          logEvent("recording-key-fallback", `${accelerator}:${command}`);
+          mainWindow.webContents.send("recording-command", command);
+        }
+      });
+      if (ok) registeredCount += 1;
+    } catch (error) {
+      logEvent("recording-key-fallback: failed", `${accelerator} ${error?.message || String(error)}`);
+    }
+  }
+  recordingKeyFallbacksActive = registeredCount > 0;
+  logEvent("recording-key-fallback: registered", String(registeredCount));
+}
+
+function unregisterRecordingKeyFallbacks() {
+  if (!recordingKeyFallbacksActive) return;
+  for (const accelerator of ["Enter", "Esc", "Escape", "Backspace", "Delete"]) {
+    globalShortcut.unregister(accelerator);
+  }
+  recordingKeyFallbacksActive = false;
+  logEvent("recording-key-fallback: unregistered");
 }
 
 function stopWindowsHotkeyHelper() {
@@ -762,6 +803,7 @@ ipcMain.handle("window:hide", async (event) => hideWindow(BrowserWindow.fromWebC
 ipcMain.handle("app:log", async (_event, message, detail) => logEvent(`renderer: ${message}`, detail || ""));
 ipcMain.handle("mimo:transcribe", async (_event, payload) => callMimo(payload));
 ipcMain.handle("input:inject", async (_event, text) => injectText(text));
+ipcMain.handle("recording:keys:clear", async () => unregisterRecordingKeyFallbacks());
 
 app.whenReady().then(async () => {
   logEvent("app: ready");
@@ -778,6 +820,7 @@ app.whenReady().then(async () => {
 
 app.on("will-quit", () => {
   logEvent("app: will-quit");
+  unregisterRecordingKeyFallbacks();
   stopWindowsHotkeyHelper();
   globalShortcut.unregisterAll();
 });
