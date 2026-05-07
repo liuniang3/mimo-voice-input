@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("mimoInput", {
   openSettings: () => ipcRenderer.invoke("window:settings"),
   onHotkeyRecord: (callback) => ipcRenderer.on("hotkey-record", callback),
   onRecordingCommand: (callback) => ipcRenderer.on("recording-command", (_event, command) => callback(command)),
+  onRetryLastVoiceRequest: (callback) => ipcRenderer.on("retry-last-voice-request", callback),
   onOpenSettings: (callback) => ipcRenderer.on("open-settings", callback),
   onWindowMode: (callback) => ipcRenderer.on("window-mode", (_event, mode) => callback(mode)),
   onWindowBlur: (callback) => ipcRenderer.on("window-blur", callback)

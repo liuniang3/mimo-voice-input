@@ -39,12 +39,14 @@ let recordingRmsSum = 0;
 let recordingSampleCount = 0;
 let silenceGainNode;
 let isRecording = false;
+let isTranscribing = false;
 let appSettings = {};
 let autoSendAfterTranscript = false;
 let currentWindowMode = "compact";
 let hotkeyCaptureOriginalValue = "";
 let recordingTranscriptionMode = "stable";
 let recordingShortContext = "";
+let lastVoiceRequest = null;
 
 function normalizeTranscriptionMode(mode) {
   return TRANSCRIPTION_MODES.has(mode) ? mode : "stable";
@@ -191,35 +193,83 @@ async function stopRecording() {
 
   const wavBytes = encodeWav(recordingChunks, recordingSampleRate);
   const audioDataUrl = `data:audio/wav;base64,${arrayBufferToBase64(wavBytes.buffer)}`;
+  const transcriptionRequest = {
+    audioDataUrl,
+    shortContext: recordingShortContext,
+    transcriptionMode,
+    autoSendAfterTranscript
+  };
+  lastVoiceRequest = transcriptionRequest;
+
+  await runVoiceRequest(transcriptionRequest, {
+    bytes: wavBytes.byteLength,
+    retry: false
+  });
+  recordingChunks = [];
+  recordingShortContext = "";
+}
+
+async function runVoiceRequest(request, { bytes = 0, retry = false } = {}) {
+  if (!request?.audioDataUrl) {
+    setStatus("warning", "Nothing to retry", "Record a voice clip first.");
+    setButtons("ready");
+    return;
+  }
+  if (isRecording || isTranscribing) {
+    setStatus("warning", "Busy", "Finish the current recording or transcription first.");
+    return;
+  }
+
+  isTranscribing = true;
+  setButtons("transcribing");
+  const transcriptionMode = normalizeTranscriptionMode(request.transcriptionMode);
+  const modeDetail = transcriptionMode === "fast"
+    ? "MiMo is transcribing in fast mode."
+    : "MiMo is transcribing, then cleaning the text.";
+  setStatus("transcribing", retry ? "Retrying" : "Transcribing", modeDetail);
 
   try {
-    logRenderer("mimo: transcribe start", `bytes=${wavBytes.byteLength}`);
+    logRenderer(retry ? "mimo: retry start" : "mimo: transcribe start", bytes ? `bytes=${bytes}` : "");
     const transcript = await window.mimoInput.transcribe({
-      audioDataUrl,
-      shortContext: recordingShortContext,
+      audioDataUrl: request.audioDataUrl,
+      shortContext: request.shortContext,
       transcriptionMode
     });
     resultText.value = transcript;
-    logRenderer("mimo: transcribe done", `chars=${transcript.length}`);
+    logRenderer(retry ? "mimo: retry done" : "mimo: transcribe done", `chars=${transcript.length}`);
     if (transcript) {
-      if (autoSendAfterTranscript) {
-      setStatus("transcribing", "Sending", "Pasting into the previous focused app.");
+      if (request.autoSendAfterTranscript) {
+        setStatus("transcribing", "Sending", "Pasting into the previous focused app.");
         resultText.value = transcript;
         await sendResult({ hideAfterSend: true });
         return;
       }
-      setStatus("ready", "Ready to send", "Review the text, then press Ctrl+Enter.");
+      setStatus("ready", retry ? "Retry ready" : "Ready to send", "Review the text, then press Ctrl+Enter.");
     } else {
       setStatus("warning", "No speech detected", "Try recording a little closer to the microphone.");
     }
   } catch (error) {
-    logRenderer("mimo: transcribe failed", error.message || String(error));
-    setStatus("error", "Request failed", error.message || String(error));
+    logRenderer(retry ? "mimo: retry failed" : "mimo: transcribe failed", error.message || String(error));
+    setStatus("error", retry ? "Retry failed" : "Request failed", error.message || String(error));
   } finally {
-    recordingChunks = [];
-    recordingShortContext = "";
+    isTranscribing = false;
     setButtons("ready");
   }
+}
+
+async function retryLastVoiceRequest() {
+  if (!lastVoiceRequest) {
+    setStatus("warning", "Nothing to retry", "Record a voice clip first.");
+    setButtons("ready");
+    return;
+  }
+  await runVoiceRequest(
+    {
+      ...lastVoiceRequest,
+      autoSendAfterTranscript: false
+    },
+    { retry: true }
+  );
 }
 
 async function cancelRecording() {
@@ -640,6 +690,11 @@ window.mimoInput.onRecordingCommand((command) => {
   } else if (command === "cancel") {
     cancelRecording();
   }
+});
+
+window.mimoInput.onRetryLastVoiceRequest(() => {
+  logRenderer("event: retry-last-voice-request");
+  retryLastVoiceRequest();
 });
 
 window.mimoInput.onOpenSettings(async () => {

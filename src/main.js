@@ -510,12 +510,20 @@ function createTray() {
     { label: "Show", click: showWindowOnly },
     { label: "Settings", click: showSettings },
     { label: "Record", click: showAndStart },
+    { label: "Retry last request", click: retryLastVoiceRequest },
     { label: "Hide", click: () => hideWindow() },
     { type: "separator" },
     { label: "Quit", click: () => app.quit() }
   ]));
   tray.on("click", showWindowOnly);
   logEvent("tray: created");
+}
+
+function retryLastVoiceRequest() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  logEvent("tray: retry last request");
+  mainWindow.webContents.send("retry-last-voice-request");
+  showWindowOnly();
 }
 
 function buildSystemPrompt() {
