@@ -7,7 +7,8 @@
   "scripts": {
     "start": "electron .",
     "check": "node scripts/check-config.js",
-    "test:clean": "node scripts/test-clean-transcript.js"
+    "test:clean": "node scripts/test-clean-transcript.js",
+    "test:pipeline": "node scripts/test-voice-pipeline.js"
   },
   "keywords": [
     "mimo",

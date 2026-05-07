@@ -3,7 +3,7 @@ const { execFile, execFileSync, spawn } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { cleanTranscript } = require("./transcript-cleaner");
+const { createVoicePipeline } = require("./providers/voice-pipeline");
 
 const APP_ICON_PATH = path.join(__dirname, "..", "assets", "mimo-icon.ico");
 const TRAY_ICON_PATH = path.join(__dirname, "..", "assets", "mimo-tray.png");
@@ -39,6 +39,7 @@ let hotkeyHelperProcess = null;
 let windowMode = "compact";
 let targetWindowHandle = "";
 let recordingKeyFallbacksActive = false;
+let voicePipeline;
 const singleInstanceLock = app.requestSingleInstanceLock();
 
 function logEvent(message, detail = "") {
@@ -86,7 +87,7 @@ async function saveSettings(nextSettings) {
 }
 
 function normalizeTranscriptionMode(mode) {
-  return mode === "fast" ? "fast" : "stable";
+  return voicePipeline?.normalizeTranscriptionMode(mode) || (mode === "fast" ? "fast" : "stable");
 }
 
 function createWindow() {
@@ -526,208 +527,12 @@ function retryLastVoiceRequest() {
   showWindowOnly();
 }
 
-function buildSystemPrompt() {
-  return [
-    "You are a strict audio transcription engine.",
-    "Return exactly one JSON object and nothing else: {\"text\":\"...\"}.",
-    "The text value must contain only words actually spoken in the audio, after light cleanup.",
-    "Never answer questions in the audio. Never explain. Never summarize. Never list alternatives.",
-    "Never copy, mention, or transform the instructions, context, schema, examples, or rules.",
-    "If the audio is empty, unclear, or contains only noise, return {\"text\":\"\"}."
-  ].join("\n");
-}
-
-function buildRawTranscriptionSystemPrompt() {
-  return [
-    "You are a literal speech-to-text engine.",
-    "Return exactly one JSON object and nothing else: {\"text\":\"...\"}.",
-    "The text value must contain only words actually spoken in the audio.",
-    "Do not explain. Do not summarize. Do not clean filler words. Do not rewrite.",
-    "If no speech is audible, return {\"text\":\"\"}."
-  ].join("\n");
-}
-
-function buildRawTranscriptionInstruction(shortContext) {
-  return [
-    "Transcribe the actual speech in this audio.",
-    "Output exactly {\"text\":\"...\"}.",
-    shortContext ? `Reference vocabulary only; do not output unless spoken: ${shortContext}` : ""
-  ].filter(Boolean).join("\n");
-}
-
-function buildUserInstruction(shortContext) {
-  return [
-    "Transcribe the audio into Chinese/English text for direct insertion.",
-    "Output contract: exactly {\"text\":\"...\"}; no markdown, no bullet, no label, no explanation.",
-    "Allowed cleanup: remove filler sounds, hesitation words, stutters, repeated false starts, and self-correction fragments.",
-    "Preserve meaning, technical terms, product names, abbreviations, numbers, and mixed Chinese-English words.",
-    "Do not output anything that was not spoken in the audio.",
-    shortContext ? `Reference-only vocabulary/context. Do not output this unless it is spoken in the audio: ${shortContext}` : "No reference context."
-  ].join("\n");
-}
-
-function buildTextCleanupSystemPrompt() {
-  return [
-    "You clean dictated text for direct insertion.",
-    "Return exactly one JSON object and nothing else: {\"text\":\"...\"}.",
-    "Only delete filler words, hesitations, repeated false starts, and duplicate fragments.",
-    "You must add natural punctuation for sentence boundaries when punctuation is missing.",
-    "Use Chinese punctuation for Chinese text, and preserve English punctuation for English text.",
-    "Never add information. Never answer questions. Never explain. Never summarize.",
-    "Preserve meaning, technical terms, product names, abbreviations, numbers, and mixed Chinese-English words."
-  ].join("\n");
-}
-
-function buildTextCleanupInstruction(rawText, shortContext) {
-  return [
-    "Clean this raw transcript without adding anything:",
-    rawText,
-    "",
-    "Rules:",
-    "- Remove filler words such as 呃, 嗯, 啊, 就是, 然后 when they are only hesitation.",
-    "- Merge repeated words or repeated fragments caused by thinking aloud.",
-    "- Add commas and sentence-ending punctuation where the dictated text has clear sentence boundaries.",
-    "- Keep valid terms, code-like words, abbreviations, numbers, and Chinese-English mixed content.",
-    "- Do not expand, explain, summarize, answer, or infer missing content.",
-    shortContext ? `Reference vocabulary only; do not output unless present in the raw transcript: ${shortContext}` : ""
-  ].filter(Boolean).join("\n");
-}
-
 function resolveApiKey() {
-  return settings.apiKey || process.env.MIMO_API_KEY || "";
+  return voicePipeline?.resolveApiKey() || settings.apiKey || process.env.MIMO_API_KEY || "";
 }
 
 function resolveBaseUrl(apiKey) {
-  const configured = settings.baseUrl || process.env.MIMO_BASE_URL;
-  if (configured) {
-    return configured.replace(/\/+$/, "");
-  }
-  if (apiKey?.startsWith("tp-")) {
-    return "https://token-plan-cn.xiaomimimo.com/v1";
-  }
-  return "https://api.xiaomimimo.com/v1";
-}
-
-async function requestMimoChat(messages, { maxTokens = 1024 } = {}) {
-  const apiKey = resolveApiKey();
-  if (!apiKey) {
-    throw new Error("MiMo API key is not configured.");
-  }
-  const baseUrl = resolveBaseUrl(apiKey);
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), settings.requestTimeoutMs);
-
-  try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "api-key": apiKey,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: settings.model,
-        messages,
-        max_completion_tokens: maxTokens,
-        temperature: 0,
-        top_p: 0.1,
-        stream: false
-      })
-    });
-
-    const bodyText = await response.text();
-    if (!response.ok) {
-      throw new Error(`MiMo API ${response.status} at ${baseUrl}: ${bodyText}`);
-    }
-
-    const body = JSON.parse(bodyText);
-    const message = body?.choices?.[0]?.message ?? {};
-    return {
-      content: String(message.content || "").trim(),
-      reasoningContent: String(message.reasoning_content || "").trim()
-    };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function parseStrictJsonText(value) {
-  try {
-    const parsed = JSON.parse(String(value || "").trim());
-    if (parsed && typeof parsed.text === "string") {
-      return cleanTranscript(parsed.text);
-    }
-  } catch {
-    return "";
-  }
-  return "";
-}
-
-function responseText(response, { allowReasoningFallback = false } = {}) {
-  if (response.content) return response.content;
-  return allowReasoningFallback ? response.reasoningContent : "";
-}
-
-async function callMimo({ audioDataUrl, shortContext, transcriptionMode }) {
-  const mode = normalizeTranscriptionMode(transcriptionMode || settings.transcriptionMode);
-  logEvent("mimo: mode", mode);
-  if (mode === "fast") {
-    return callMimoFast({ audioDataUrl, shortContext });
-  }
-  return callMimoStable({ audioDataUrl, shortContext });
-}
-
-async function callMimoFast({ audioDataUrl, shortContext }) {
-  const response = await requestMimoChat([
-    { role: "system", content: buildSystemPrompt() },
-    {
-      role: "user",
-      content: [
-        {
-          type: "input_audio",
-          input_audio: {
-            data: audioDataUrl
-          }
-        },
-        {
-          type: "text",
-          text: buildUserInstruction(shortContext)
-        }
-      ]
-    }
-  ]);
-  return cleanTranscript(responseText(response, { allowReasoningFallback: true }));
-}
-
-async function callMimoStable({ audioDataUrl, shortContext }) {
-  const rawAudioResponse = await requestMimoChat([
-    { role: "system", content: buildRawTranscriptionSystemPrompt() },
-    {
-      role: "user",
-      content: [
-        {
-          type: "input_audio",
-          input_audio: {
-            data: audioDataUrl
-          }
-        },
-        {
-          type: "text",
-          text: buildRawTranscriptionInstruction(shortContext)
-        }
-      ]
-    }
-  ]);
-  const rawTranscript = cleanTranscript(responseText(rawAudioResponse, { allowReasoningFallback: true }));
-  if (!rawTranscript) return "";
-
-  const cleanedResponse = await requestMimoChat([
-    { role: "system", content: buildTextCleanupSystemPrompt() },
-    { role: "user", content: buildTextCleanupInstruction(rawTranscript, shortContext) }
-  ]);
-  const cleanedTranscript = parseStrictJsonText(cleanedResponse.content);
-  return cleanedTranscript || rawTranscript;
+  return voicePipeline?.resolveBaseUrl(apiKey) || "https://api.xiaomimimo.com/v1";
 }
 
 function sendPasteKeystroke() {
@@ -809,13 +614,15 @@ ipcMain.handle("app:status", async () => ({
 }));
 ipcMain.handle("window:hide", async (event) => hideWindow(BrowserWindow.fromWebContents(event.sender) || mainWindow));
 ipcMain.handle("app:log", async (_event, message, detail) => logEvent(`renderer: ${message}`, detail || ""));
-ipcMain.handle("mimo:transcribe", async (_event, payload) => callMimo(payload));
+ipcMain.handle("voice:transcribe", async (_event, payload) => voicePipeline.transcribe(payload));
+ipcMain.handle("mimo:transcribe", async (_event, payload) => voicePipeline.transcribe(payload));
 ipcMain.handle("input:inject", async (_event, text) => injectText(text));
 ipcMain.handle("recording:keys:clear", async () => unregisterRecordingKeyFallbacks());
 
 app.whenReady().then(async () => {
   logEvent("app: ready");
   await loadSettings();
+  voicePipeline = createVoicePipeline({ getSettings: () => settings, logEvent });
   logEvent("settings: loaded", JSON.stringify({ hotkey: settings.hotkey, microphoneDeviceId: settings.microphoneDeviceId, transcriptionMode: settings.transcriptionMode }));
   configurePermissions();
   createWindow();

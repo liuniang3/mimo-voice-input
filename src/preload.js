@@ -5,7 +5,7 @@ contextBridge.exposeInMainWorld("mimoInput", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
   log: (message, detail) => ipcRenderer.invoke("app:log", message, detail),
-  transcribe: (payload) => ipcRenderer.invoke("mimo:transcribe", payload),
+  transcribe: (payload) => ipcRenderer.invoke("voice:transcribe", payload),
   injectText: (text) => ipcRenderer.invoke("input:inject", text),
   hide: () => ipcRenderer.invoke("window:hide"),
   clearRecordingKeys: () => ipcRenderer.invoke("recording:keys:clear"),
