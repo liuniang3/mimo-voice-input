@@ -1,35 +1,23 @@
-# MiMo Voice Input
+# Open Voice Input
 
-Windows voice input assistant powered by Xiaomi MiMo V2.5 multimodal API.
+Windows voice input assistant with pluggable ASR providers and optional LLM text cleanup.
 
-MiMo Voice Input is an Electron MVP for global dictation on Windows. It is not a Windows IME driver. It records a short voice clip, sends the audio to MiMo, cleans the transcript, writes the result to the clipboard, and pastes it into the previously focused app.
+Open Voice Input is an Electron MVP for global dictation on Windows. It is not a Windows IME driver. It records speech, transcribes it through a selected ASR provider, optionally cleans the raw transcript with a text model, writes the result to the clipboard, and pastes it into the previously focused app.
 
 Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
-
-## Acknowledgements
-
-Thanks to Xiaomi MiMo and the MiMo trillion-token plan for making it easier for independent developers to experiment with capable multimodal models.
 
 ## Features
 
 - Global hotkey recording
-- Small floating recording indicator
+- Small floating realtime transcript window
 - Tray menu for settings
-- Configurable API key, base URL, hotkey, microphone, and transcription mode
-- Two explicit transcription mode buttons in settings: `Stable` and `Fast`
-- Token Plan URL auto-selection for `tp-` keys
+- Configurable microphone, hotkey, API keys, base URLs, providers, and models
+- ASR providers: MiMo audio understanding, Qwen3-ASR, and Fun-ASR
+- Cleanup providers: MiMo chat cleanup and OpenAI-compatible chat cleanup
+- `Fast` mode: ASR only, lower latency
+- `Stable` mode: ASR first, then LLM cleanup for filler words, repeated fragments, and punctuation
 - Clipboard paste into the previous focused app
-- Stable two-step transcription mode
-- Local cleanup for common filler words and prompt-leak style outputs
-
-## Latest Update
-
-The settings panel now uses two dedicated buttons for transcription mode control:
-
-- `Stable`: two isolated MiMo steps. The first call performs raw audio transcription, and the second call cleans the plain text.
-- `Fast`: one MiMo call for lower latency.
-
-Mode switching is isolated per recording session. When a recording starts, the app refreshes the latest saved settings and locks the selected transcription mode for that recording. Changing the mode while a recording is already being processed will only affect the next recording, not the current one. The main process also keeps the two mode paths separate as `callMimoStable()` and `callMimoFast()` so future prompt or error-handling changes can be made without accidentally mixing the two behaviors.
+- Local cleanup fallback for common filler words, repeated fragments, and prompt-leak style outputs
 
 ## Install
 
@@ -51,97 +39,92 @@ Optional environment setup:
 Copy-Item .env.example .env
 ```
 
-The app can read `MIMO_API_KEY` and `MIMO_BASE_URL` from Windows environment variables. You can also enter the key and URL in the app settings panel.
+You can configure keys in the settings panel, or provide them with environment variables:
+
+```text
+MIMO_API_KEY
+MIMO_BASE_URL
+DASHSCOPE_API_KEY
+QWEN_ASR_API_KEY
+FUN_ASR_API_KEY
+CLEANER_API_KEY
+CLEANER_BASE_URL
+```
 
 ## Run
 
 Double-click without a console window:
 
 ```text
-Start MiMo Voice Input.vbs
+Start Open Voice Input.vbs
 ```
 
 Double-click with a debug console:
 
 ```text
-Start MiMo Voice Input.cmd
+Start Open Voice Input.cmd
 ```
 
 Command line:
 
 ```powershell
-$env:MIMO_API_KEY="your_api_key"
-$env:MIMO_BASE_URL="https://token-plan-cn.xiaomimimo.com/v1"
 npm start
 ```
-
-For `tp-xxxxx` Token Plan keys, the app defaults to:
-
-```text
-https://token-plan-cn.xiaomimimo.com/v1
-```
-
-If the subscription page shows another cluster, set `MIMO_BASE_URL` to the cluster URL shown by the provider.
 
 ## Usage
 
 1. Start the app.
 2. Right-click the tray icon and open `Settings`.
-3. Set API credentials, microphone, and global hotkey.
+3. Set ASR provider, cleanup provider, credentials, microphone, and global hotkey.
 4. Press the global hotkey.
-5. Speak while the floating window shows `Recording`.
+5. Speak while the floating window shows recording or realtime text.
 6. Press `Enter` to stop recording.
-7. The transcript is copied to the clipboard and pasted into the previous focused app.
+7. The final transcript is copied to the clipboard and pasted into the previous focused app.
 
-Default global hotkey: `Ctrl+Alt+M`. After setting a custom hotkey, only that custom hotkey is registered.
+Default global hotkey: `Ctrl+Alt+M`.
+
+## Providers
+
+ASR providers:
+
+- `MiMo`: multimodal audio understanding. Useful as a fallback, but not a dedicated ASR endpoint.
+- `Qwen3-ASR`: dedicated ASR through DashScope-compatible configuration. Supports batch and realtime modes.
+- `Fun-ASR`: dedicated DashScope ASR. Realtime recording uses the WebSocket API. Batch URL transcription uses the REST API when a public audio URL is provided.
+
+Cleanup providers:
+
+- `MiMo`: text cleanup through MiMo chat.
+- `OpenAI-compatible`: text cleanup through any compatible chat endpoint.
 
 ## Transcription Modes
 
-The settings panel provides two mode buttons.
+`Fast` mode performs ASR only. It has lower latency and is best when the ASR model already produces clean text.
 
-`Stable` is the default. It calls MiMo twice:
+`Stable` mode performs two steps:
 
-1. Raw audio transcription
-2. Plain-text cleanup for filler words, repeated fragments, and punctuation
+1. ASR provider returns raw transcript text.
+2. Cleanup provider removes filler words, merges repeated fragments, and adds punctuation.
 
-`Fast` uses one MiMo call. It is lower latency, but it is more likely to produce non-transcription text when the audio is ambiguous.
-
-Each recording uses a mode snapshot captured at recording start, so the current recording cannot be affected by later mode changes.
+Each recording uses a settings snapshot captured at recording start, so changing settings while a recording is processing affects only the next recording.
 
 ## Privacy
 
-The app uploads the current recording to the configured MiMo-compatible API endpoint. It does not read the screen and does not upload clipboard content. The optional short context field is sent only when the user enters text there.
+The app uploads only the current recording and optional user-entered short context to the configured provider endpoints. It does not read the screen and does not automatically upload clipboard content.
 
-API keys are stored in Electron's user data folder if entered in settings. For public forks or demos, prefer environment variables or a local `.env` file that is not committed.
-
-## Development
-
-Run checks:
-
-```powershell
-npm run check
-npm run test:clean
-node --check src\main.js
-node --check src\preload.js
-node --check src\renderer\renderer.js
-```
+API keys saved in settings are stored in Electron's user data folder. For public forks, demos, or shared machines, prefer environment variables or a local `.env` file that is not committed.
 
 Runtime logs are written to:
 
 ```text
-%APPDATA%\mimo-voice-input\mimo.log
+%APPDATA%\Open Voice Input\open-voice-input.log
 ```
-
-Local logs, `.env`, `node_modules`, and build outputs are ignored by Git.
 
 ## Known Limits
 
-- This is not a real Windows IME driver. It pastes text through the clipboard and may be blocked or delayed by some target apps.
-- MiMo multimodal chat is not a dedicated ASR endpoint, so occasional non-transcription responses, hallucinated explanations, or missed punctuation can still happen.
-- `Stable` mode improves reliability by using two MiMo calls, but it increases latency and API cost.
-- Focus restoration and paste behavior can vary by target application, elevated windows, remote desktops, browser security behavior, and Windows input policy.
-- Audio is uploaded to the configured API endpoint. Privacy depends on the provider, account, and endpoint selected by the user.
-- Microphone selection depends on Windows device names and Electron audio capture behavior; some devices may need manual selection or app restart.
+- This is not a real Windows IME driver. It uses clipboard paste and may be blocked or delayed by some target apps.
+- Focus restoration and paste behavior can vary by target app, elevated windows, remote desktops, browser security behavior, and Windows input policy.
+- Realtime ASR quality depends on microphone choice, network latency, provider behavior, and model version.
+- If the ASR step mishears speech, the cleanup step can only clean the mistaken text; it cannot recover unheard content.
 - Filler-word and repetition cleanup is partly heuristic. It may miss some fillers or remove words that were intentionally repeated.
 - There is no packaged installer, auto-update flow, or code-signing setup yet. Running from source currently requires Node.js, npm, and the Electron dependency set.
 

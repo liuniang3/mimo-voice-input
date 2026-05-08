@@ -20,7 +20,9 @@ const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const apiKeyInput = document.getElementById("apiKeyInput");
 const baseUrlInput = document.getElementById("baseUrlInput");
 const asrProviderSelect = document.getElementById("asrProviderSelect");
+const asrModeSelect = document.getElementById("asrModeSelect");
 const asrModelInput = document.getElementById("asrModelInput");
+const asrRealtimeModelInput = document.getElementById("asrRealtimeModelInput");
 const asrBaseUrlInput = document.getElementById("asrBaseUrlInput");
 const asrApiKeyInput = document.getElementById("asrApiKeyInput");
 const asrLanguageInput = document.getElementById("asrLanguageInput");
@@ -34,8 +36,16 @@ const hotkeyHint = document.getElementById("hotkeyHint");
 const stableModeBtn = document.getElementById("stableModeBtn");
 const fastModeBtn = document.getElementById("fastModeBtn");
 const clearApiKeyBtn = document.getElementById("clearApiKeyBtn");
+const testConnectionBtn = document.getElementById("testConnectionBtn");
 
 const TRANSCRIPTION_MODES = new Set(["stable", "fast"]);
+const ASR_MODES = new Set(["batch", "realtime"]);
+const QWEN_ASR_OPENAI_MODEL = "qwen3-asr-flash";
+const QWEN_ASR_OPENAI_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+const QWEN_ASR_REALTIME_MODEL = "qwen3-asr-flash-realtime";
+const FUN_ASR_MODEL = "fun-asr";
+const FUN_ASR_REST_BASE_URL = "https://dashscope.aliyuncs.com/api/v1";
+const FUN_ASR_REALTIME_MODEL = "fun-asr-realtime";
 
 let audioContext;
 let sourceNode;
@@ -56,10 +66,83 @@ let currentWindowMode = "compact";
 let hotkeyCaptureOriginalValue = "";
 let recordingTranscriptionMode = "stable";
 let recordingShortContext = "";
+let recordingAsrMode = "batch";
 let lastVoiceRequest = null;
+let resizeTimer = 0;
 
 function normalizeTranscriptionMode(mode) {
   return TRANSCRIPTION_MODES.has(mode) ? mode : "stable";
+}
+
+function normalizeAsrMode(mode) {
+  return ASR_MODES.has(mode) ? mode : "batch";
+}
+
+function normalizeQwenAsrModel(model) {
+  const value = String(model || "").trim();
+  if (!value || value === "mimo-v2.5") return QWEN_ASR_OPENAI_MODEL;
+  if (value.includes("realtime") || value.includes("filetrans")) return QWEN_ASR_OPENAI_MODEL;
+  return value;
+}
+
+function normalizeQwenRealtimeModel(model) {
+  const value = String(model || "").trim();
+  if (!value || value === "mimo-v2.5" || value === QWEN_ASR_OPENAI_MODEL) return QWEN_ASR_REALTIME_MODEL;
+  return value;
+}
+
+function normalizeFunAsrModel(model) {
+  const value = String(model || "").trim();
+  if (!value || value === "mimo-v2.5" || value === QWEN_ASR_OPENAI_MODEL || value.includes("realtime")) {
+    return FUN_ASR_MODEL;
+  }
+  return value;
+}
+
+function normalizeFunAsrRealtimeModel(model) {
+  const value = String(model || "").trim();
+  if (!value || value === "mimo-v2.5" || value === QWEN_ASR_OPENAI_MODEL || value === FUN_ASR_MODEL) {
+    return FUN_ASR_REALTIME_MODEL;
+  }
+  return value;
+}
+
+function normalizeProviderSettingsDraft() {
+  if (asrProviderSelect.value === "qwen3-asr") {
+    asrModelInput.value = normalizeQwenAsrModel(asrModelInput.value);
+    asrRealtimeModelInput.value = normalizeQwenRealtimeModel(asrRealtimeModelInput.value);
+    if (!asrBaseUrlInput.value.trim()) {
+      asrBaseUrlInput.value = QWEN_ASR_OPENAI_BASE_URL;
+    }
+  } else if (asrProviderSelect.value === "fun-asr") {
+    asrModelInput.value = normalizeFunAsrModel(asrModelInput.value);
+    asrRealtimeModelInput.value = normalizeFunAsrRealtimeModel(asrRealtimeModelInput.value);
+    if (!asrBaseUrlInput.value.trim() || asrBaseUrlInput.value.trim() === QWEN_ASR_OPENAI_BASE_URL) {
+      asrBaseUrlInput.value = FUN_ASR_REST_BASE_URL;
+    }
+  } else if (asrProviderSelect.value === "mimo" && !asrModelInput.value.trim()) {
+    asrModelInput.value = "mimo-v2.5";
+  }
+}
+
+function normalizeAsrModelForSelectedProvider(value) {
+  if (asrProviderSelect.value === "qwen3-asr") {
+    return normalizeQwenAsrModel(value);
+  }
+  if (asrProviderSelect.value === "fun-asr") {
+    return normalizeFunAsrModel(value);
+  }
+  return String(value || "").trim();
+}
+
+function normalizeRealtimeModelForSelectedProvider(value) {
+  if (asrProviderSelect.value === "qwen3-asr") {
+    return normalizeQwenRealtimeModel(value);
+  }
+  if (asrProviderSelect.value === "fun-asr") {
+    return normalizeFunAsrRealtimeModel(value);
+  }
+  return String(value || "").trim();
 }
 
 function logRenderer(message, detail = "") {
@@ -71,6 +154,7 @@ function setStatus(kind, title, detail) {
   pulse.dataset.kind = kind;
   statusTitle.textContent = title;
   statusDetail.textContent = detail;
+  scheduleRecordingResize();
 }
 
 function setLevel(value) {
@@ -84,21 +168,41 @@ function setButtons(state) {
   sendBtn.disabled = !resultText.value.trim() || state === "recording" || state === "transcribing";
 }
 
+function scheduleRecordingResize() {
+  if (currentWindowMode !== "recording") return;
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(resizeRecordingWindowToContent, 30);
+}
+
+function resizeRecordingWindowToContent() {
+  if (currentWindowMode !== "recording") return;
+  const textLength = statusDetail.textContent.length;
+  const contentWidth = textLength > 48 ? 520 : textLength > 22 ? 420 : 320;
+  const contentHeight = Math.min(420, Math.max(112, Math.ceil(statusPanel.scrollHeight + 24)));
+  window.mimoInput.resizeRecordingWindow?.({
+    width: contentWidth,
+    height: contentHeight
+  }).catch(() => {});
+  if (statusDetail.scrollHeight > statusDetail.clientHeight) {
+    statusDetail.scrollTop = statusDetail.scrollHeight;
+  }
+}
+
 async function refreshStatus() {
   const status = await window.mimoInput.getStatus();
   appSettings = status.settings || {};
-  const hotkeys = status.registeredHotkeys?.length ? status.registeredHotkeys.join(" / ") : "no global hotkey";
+  const hotkeys = status.registeredHotkeys?.length ? status.registeredHotkeys.join(" / ") : "没有可用的全局快捷键";
   apiState.textContent = status.hasApiKey
-    ? `API key configured · ${status.keyKind} · ${status.baseUrl}`
-    : "Missing MIMO_API_KEY";
+    ? `API Key 已配置 · ${status.keyKind} · ${status.baseUrl}`
+    : "未配置 API Key";
   apiState.dataset.ok = String(status.hasApiKey);
   if (!isRecording) {
     const chosenHotkey = appSettings.hotkey || "CommandOrControl+Alt+M";
     const chosenRegistered = status.registeredHotkeys?.includes(chosenHotkey);
     const detail = chosenRegistered
-      ? `Global hotkey: ${chosenHotkey}`
-      : `Could not register: ${chosenHotkey}. Active: ${hotkeys}`;
-    setStatus(chosenRegistered ? "ready" : "warning", chosenRegistered ? "Ready" : "Hotkey unavailable", detail);
+      ? `全局快捷键：${chosenHotkey}`
+      : `无法注册：${chosenHotkey}。当前可用：${hotkeys}`;
+    setStatus(chosenRegistered ? "ready" : "warning", chosenRegistered ? "就绪" : "快捷键不可用", detail);
   }
   fillSettingsForm(status);
   return status;
@@ -114,10 +218,11 @@ async function startRecording({ autoSend = true } = {}) {
   }
   autoSendAfterTranscript = autoSend;
   recordingTranscriptionMode = normalizeTranscriptionMode(appSettings.transcriptionMode);
+  recordingAsrMode = normalizeAsrMode(appSettings.asrMode);
   recordingShortContext = buildShortContext();
   resultText.value = "";
   setButtons("recording");
-  setStatus("recording", "Recording", "");
+  setStatus("recording", "正在录音", "");
   levelMeter.hidden = false;
   setLevel(0);
   recordingPeak = 0;
@@ -137,6 +242,20 @@ async function startRecording({ autoSend = true } = {}) {
     throw error;
   }
 
+  if ((appSettings.asrProvider === "qwen3-asr" || appSettings.asrProvider === "fun-asr") && recordingAsrMode === "realtime") {
+    try {
+      const result = await window.mimoInput.startRealtimeAsr();
+      if (result?.enabled) {
+        setStatus("recording", "正在录音", "实时转写已连接，开始说话。");
+        resultText.value = "实时转写已连接，开始说话即可显示结果。";
+      }
+    } catch (error) {
+      logRenderer("qwen realtime: start failed", error.message || String(error));
+      setStatus("warning", "实时连接失败", "已继续录音，停止后将使用非实时转写。");
+      recordingAsrMode = "batch";
+    }
+  }
+
   audioContext = new AudioContext();
   recordingSampleRate = audioContext.sampleRate;
   sourceNode = audioContext.createMediaStreamSource(mediaStream);
@@ -145,16 +264,21 @@ async function startRecording({ autoSend = true } = {}) {
   silenceGainNode.gain.value = 0;
 
   const track = mediaStream.getAudioTracks()[0];
-  const actualLabel = track?.label || "Unknown microphone";
+  const actualLabel = track?.label || "未知麦克风";
   const actualDeviceId = track?.getSettings?.().deviceId || "";
   logRenderer("recording: microphone opened", actualLabel);
-  microphoneHint.textContent = `Actual input: ${actualLabel}`;
-  setStatus("recording", "Recording", actualLabel);
+  microphoneHint.textContent = `实际输入：${actualLabel}`;
+  if (recordingAsrMode !== "realtime") {
+    setStatus("recording", "正在录音", actualLabel);
+  }
 
   processorNode.onaudioprocess = (event) => {
     if (!isRecording) return;
     const input = event.inputBuffer.getChannelData(0);
     recordingChunks.push(new Float32Array(input));
+    if (recordingAsrMode === "realtime") {
+      window.mimoInput.appendRealtimeAudio(float32ToPcm16Base64(input, recordingSampleRate, 16000)).catch(() => {});
+    }
     updateAudioStats(input);
   };
 
@@ -163,7 +287,9 @@ async function startRecording({ autoSend = true } = {}) {
   silenceGainNode.connect(audioContext.destination);
 
   if (appSettings.microphoneDeviceId && actualDeviceId && appSettings.microphoneDeviceId !== actualDeviceId) {
-    setStatus("recording", "Recording", `Fallback input: ${actualLabel}`);
+    if (recordingAsrMode !== "realtime") {
+      setStatus("recording", "正在录音", `已切换到备用输入：${actualLabel}`);
+    }
   }
 }
 
@@ -175,9 +301,9 @@ async function stopRecording() {
   setButtons("transcribing");
   const transcriptionMode = normalizeTranscriptionMode(recordingTranscriptionMode);
   const modeDetail = transcriptionMode === "fast"
-    ? "MiMo is transcribing in fast mode."
-    : "MiMo is transcribing, then cleaning the text.";
-  setStatus("transcribing", "Transcribing", modeDetail);
+    ? "快速模式：仅执行语音识别。"
+    : "稳定模式：先转写，再进行文本清理。";
+  setStatus("transcribing", "正在转写", modeDetail);
 
   processorNode?.disconnect();
   silenceGainNode?.disconnect();
@@ -190,21 +316,46 @@ async function stopRecording() {
   const rms = recordingSampleCount ? Math.sqrt(recordingRmsSum / recordingSampleCount) : 0;
   if (durationMs < 500 || recordingSampleCount < recordingSampleRate * 0.45) {
     logRenderer("recording: too short", `duration=${durationMs} samples=${recordingSampleCount}`);
-    setStatus("warning", "Too short", "Hold recording for at least half a second.");
+    setStatus("warning", "录音太短", "请至少录制半秒以上。");
     setButtons("ready");
     return;
   }
   if (recordingPeak < 0.012 || rms < 0.003) {
     logRenderer("recording: no input", `peak=${recordingPeak} rms=${rms}`);
-    setStatus("warning", "No input level", "No clear microphone signal was detected.");
+    setStatus("warning", "没有检测到声音", "未检测到清晰的麦克风输入。");
     setButtons("ready");
     return;
   }
 
   const wavBytes = encodeWav(recordingChunks, recordingSampleRate);
+  const pcm16Base64 = float32ToPcm16Base64(flattenFloat32(recordingChunks), recordingSampleRate, 16000);
   const audioDataUrl = `data:audio/wav;base64,${arrayBufferToBase64(wavBytes.buffer)}`;
+  if (recordingAsrMode === "realtime") {
+    try {
+      isTranscribing = true;
+      setButtons("transcribing");
+      setStatus("transcribing", "正在整理", "正在获取实时转写最终结果。");
+      const transcript = await window.mimoInput.finishRealtimeAsr({
+        shortContext: recordingShortContext,
+        transcriptionMode
+      });
+      await handleTranscriptResult(transcript, { retry: false, autoSendAfterTranscript });
+    } catch (error) {
+      logRenderer("qwen realtime: finish failed", error.message || String(error));
+      setStatus("error", "实时转写失败", error.message || String(error));
+      setButtons("ready");
+    } finally {
+      isTranscribing = false;
+      setButtons("ready");
+    }
+    recordingChunks = [];
+    recordingShortContext = "";
+    return;
+  }
+
   const transcriptionRequest = {
     audioDataUrl,
+    pcm16Base64,
     shortContext: recordingShortContext,
     transcriptionMode,
     autoSendAfterTranscript
@@ -221,12 +372,12 @@ async function stopRecording() {
 
 async function runVoiceRequest(request, { bytes = 0, retry = false } = {}) {
   if (!request?.audioDataUrl) {
-    setStatus("warning", "Nothing to retry", "Record a voice clip first.");
+    setStatus("warning", "没有可重试内容", "请先录制一段语音。");
     setButtons("ready");
     return;
   }
   if (isRecording || isTranscribing) {
-    setStatus("warning", "Busy", "Finish the current recording or transcription first.");
+    setStatus("warning", "正在处理", "请先完成当前录音或转写。");
     return;
   }
 
@@ -234,42 +385,49 @@ async function runVoiceRequest(request, { bytes = 0, retry = false } = {}) {
   setButtons("transcribing");
   const transcriptionMode = normalizeTranscriptionMode(request.transcriptionMode);
   const modeDetail = transcriptionMode === "fast"
-    ? "MiMo is transcribing in fast mode."
-    : "MiMo is transcribing, then cleaning the text.";
-  setStatus("transcribing", retry ? "Retrying" : "Transcribing", modeDetail);
+    ? "快速模式：仅执行语音识别。"
+    : "稳定模式：先转写，再进行文本清理。";
+  setStatus("transcribing", retry ? "正在重试" : "正在转写", modeDetail);
 
   try {
     logRenderer(retry ? "mimo: retry start" : "mimo: transcribe start", bytes ? `bytes=${bytes}` : "");
     const transcript = await window.mimoInput.transcribe({
       audioDataUrl: request.audioDataUrl,
+      pcm16Base64: request.pcm16Base64,
       shortContext: request.shortContext,
       transcriptionMode
     });
-    resultText.value = transcript;
     logRenderer(retry ? "mimo: retry done" : "mimo: transcribe done", `chars=${transcript.length}`);
-    if (transcript) {
-      if (request.autoSendAfterTranscript) {
-        setStatus("transcribing", "Sending", "Pasting into the previous focused app.");
-        resultText.value = transcript;
-        await sendResult({ hideAfterSend: true });
-        return;
-      }
-      setStatus("ready", retry ? "Retry ready" : "Ready to send", "Review the text, then press Ctrl+Enter.");
-    } else {
-      setStatus("warning", "No speech detected", "Try recording a little closer to the microphone.");
-    }
+    await handleTranscriptResult(transcript, {
+      retry,
+      autoSendAfterTranscript: request.autoSendAfterTranscript
+    });
   } catch (error) {
     logRenderer(retry ? "mimo: retry failed" : "mimo: transcribe failed", error.message || String(error));
-    setStatus("error", retry ? "Retry failed" : "Request failed", error.message || String(error));
+    setStatus("error", retry ? "重试失败" : "请求失败", error.message || String(error));
   } finally {
     isTranscribing = false;
     setButtons("ready");
   }
 }
 
+async function handleTranscriptResult(transcript, { retry = false, autoSendAfterTranscript = false } = {}) {
+  resultText.value = transcript || "";
+  if (transcript) {
+    if (autoSendAfterTranscript) {
+      setStatus("transcribing", "正在写入", "正在粘贴到上一个焦点应用。");
+      await sendResult({ hideAfterSend: true });
+      return;
+    }
+    setStatus("ready", retry ? "重试完成" : "可以发送", "确认文本后按 Ctrl+Enter 发送。");
+  } else {
+    setStatus("warning", "没有识别到语音", "请靠近麦克风再试一次。");
+  }
+}
+
 async function retryLastVoiceRequest() {
   if (!lastVoiceRequest) {
-    setStatus("warning", "Nothing to retry", "Record a voice clip first.");
+    setStatus("warning", "没有可重试内容", "请先录制一段语音。");
     setButtons("ready");
     return;
   }
@@ -298,11 +456,12 @@ async function cancelRecording() {
   } catch {
     // Best-effort cleanup for an interrupted recording.
   }
+  await window.mimoInput.cancelRealtimeAsr?.();
   recordingChunks = [];
   levelMeter.hidden = true;
   setLevel(0);
   setButtons("ready");
-  setStatus("ready", "Canceled", "");
+  setStatus("ready", "已取消", "");
   await window.mimoInput.hide();
 }
 
@@ -333,7 +492,7 @@ async function openMicrophoneStream() {
       microphoneGroupId: ""
     });
     microphoneSelect.value = "";
-    microphoneHint.textContent = "Saved microphone was unavailable; using system default.";
+    microphoneHint.textContent = "已保存的麦克风不可用，正在使用系统默认麦克风。";
     return fallbackStream;
   }
 }
@@ -363,15 +522,15 @@ function buildShortContext() {
 async function sendResult({ hideAfterSend = false } = {}) {
   const text = resultText.value.trim();
   if (!text) return;
-  setStatus("transcribing", "Sending", "Pasting into the previous focused app.");
+  setStatus("transcribing", "正在写入", "正在粘贴到上一个焦点应用。");
   try {
     await window.mimoInput.injectText(text);
-    setStatus("ready", "Sent", "Press the hotkey for another recording.");
+    setStatus("ready", "已发送", "按快捷键开始下一次录音。");
     if (hideAfterSend) {
       await window.mimoInput.hide();
     }
   } catch (error) {
-    setStatus("error", "Paste failed", error.message || String(error));
+    setStatus("error", "写入失败", error.message || String(error));
   } finally {
     setButtons("ready");
   }
@@ -387,10 +546,10 @@ async function refreshMicrophones({ requestPermission = false } = {}) {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const microphones = devices.filter((device) => device.kind === "audioinput");
     microphoneSelect.innerHTML = "";
-    microphoneSelect.append(new Option("System default microphone", ""));
+    microphoneSelect.append(new Option("系统默认麦克风", ""));
 
     microphones.forEach((device, index) => {
-      const label = device.label || `Microphone ${index + 1}`;
+      const label = device.label || `麦克风 ${index + 1}`;
       microphoneSelect.append(new Option(label, device.deviceId));
     });
 
@@ -403,12 +562,12 @@ async function refreshMicrophones({ requestPermission = false } = {}) {
           microphoneLabel: "",
           microphoneGroupId: ""
         });
-        microphoneHint.textContent = "Saved microphone was not found; using system default.";
+        microphoneHint.textContent = "找不到已保存的麦克风，正在使用系统默认麦克风。";
       }
       microphoneSelect.value = "";
     }
   } catch (error) {
-    setStatus("error", "Microphone list failed", error.message || String(error));
+    setStatus("error", "麦克风列表读取失败", error.message || String(error));
   }
 }
 
@@ -419,8 +578,8 @@ async function saveMicrophoneSelection() {
     microphoneLabel: selected?.textContent || "",
     microphoneGroupId: ""
   });
-  setStatus("ready", "Settings saved", microphoneSelect.value ? "Microphone selection updated." : "Using system default microphone.");
-  microphoneHint.textContent = microphoneSelect.value ? `Selected: ${selected?.textContent || "microphone"}` : "Using system default microphone.";
+  setStatus("ready", "设置已保存", microphoneSelect.value ? "麦克风选择已更新。" : "正在使用系统默认麦克风。");
+  microphoneHint.textContent = microphoneSelect.value ? `已选择：${selected?.textContent || "麦克风"}` : "正在使用系统默认麦克风。";
 }
 
 function beginHotkeyCapture() {
@@ -523,24 +682,36 @@ async function saveHotkeySetting(hotkey) {
     appSettings = await window.mimoInput.saveSettings({ hotkey });
     const status = await refreshStatus();
     if (status.registeredHotkeys?.includes(hotkey)) {
-      setStatus("ready", "Hotkey saved", `Registered: ${hotkey}`);
+      setStatus("ready", "快捷键已保存", `已注册：${hotkey}`);
     } else {
-      setStatus("warning", "Hotkey unavailable", `Could not register ${hotkey}. Choose another combination.`);
+      setStatus("warning", "快捷键不可用", `无法注册 ${hotkey}，请换一个组合。`);
     }
   } catch (error) {
-    setStatus("error", "Hotkey save failed", error.message || String(error));
+    setStatus("error", "快捷键保存失败", error.message || String(error));
   }
 }
 
 function fillSettingsForm(status) {
   apiKeyInput.value = appSettings.apiKey || "";
   apiKeyInput.placeholder = status.hasEnvApiKey
-    ? "Using MIMO_API_KEY environment variable"
-    : "Paste MiMo API key or token plan key";
+    ? "正在使用 MIMO_API_KEY 环境变量"
+    : "粘贴 MiMo API Key 或 token plan Key";
   baseUrlInput.value = appSettings.baseUrl || "";
   asrProviderSelect.value = appSettings.asrProvider || "mimo";
-  asrModelInput.value = appSettings.asrModel || appSettings.model || "mimo-v2.5";
-  asrBaseUrlInput.value = appSettings.asrBaseUrl || "";
+  asrModeSelect.value = normalizeAsrMode(appSettings.asrMode);
+  if (asrProviderSelect.value === "qwen3-asr") {
+    asrModelInput.value = normalizeQwenAsrModel(appSettings.asrModel);
+    asrRealtimeModelInput.value = normalizeQwenRealtimeModel(appSettings.asrRealtimeModel || appSettings.asrModel);
+    asrBaseUrlInput.value = appSettings.asrBaseUrl || QWEN_ASR_OPENAI_BASE_URL;
+  } else if (asrProviderSelect.value === "fun-asr") {
+    asrModelInput.value = normalizeFunAsrModel(appSettings.asrModel);
+    asrRealtimeModelInput.value = normalizeFunAsrRealtimeModel(appSettings.asrRealtimeModel || appSettings.asrModel);
+    asrBaseUrlInput.value = appSettings.asrBaseUrl || FUN_ASR_REST_BASE_URL;
+  } else {
+    asrModelInput.value = appSettings.asrModel || appSettings.model || "mimo-v2.5";
+    asrRealtimeModelInput.value = appSettings.asrRealtimeModel || QWEN_ASR_REALTIME_MODEL;
+    asrBaseUrlInput.value = appSettings.asrBaseUrl || "";
+  }
   asrApiKeyInput.value = appSettings.asrApiKey || "";
   asrLanguageInput.value = appSettings.asrLanguage || "";
   asrEnableItnInput.checked = Boolean(appSettings.asrEnableItn);
@@ -567,8 +738,8 @@ async function setTranscriptionMode(mode) {
   renderTranscriptionMode(normalizeTranscriptionMode(appSettings.transcriptionMode));
   setStatus(
     "ready",
-    "Settings saved",
-    transcriptionMode === "fast" ? "Fast mode uses one MiMo call." : "Stable mode uses two isolated MiMo steps."
+    "设置已保存",
+    transcriptionMode === "fast" ? "快速模式只执行语音识别。" : "稳定模式会执行相互隔离的两步处理。"
   );
 }
 
@@ -579,14 +750,18 @@ function applyWindowMode(mode) {
   if (mode === "recording" || mode === "compact") {
     settingsPanel.hidden = true;
   }
+  scheduleRecordingResize();
 }
 
 async function saveAllSettings() {
+  normalizeProviderSettingsDraft();
   appSettings = await window.mimoInput.saveSettings({
     apiKey: apiKeyInput.value.trim(),
     baseUrl: baseUrlInput.value.trim(),
     asrProvider: asrProviderSelect.value,
-    asrModel: asrModelInput.value.trim(),
+    asrMode: normalizeAsrMode(asrModeSelect.value),
+    asrModel: normalizeAsrModelForSelectedProvider(asrModelInput.value),
+    asrRealtimeModel: normalizeRealtimeModelForSelectedProvider(asrRealtimeModelInput.value),
     asrBaseUrl: asrBaseUrlInput.value.trim(),
     asrApiKey: asrApiKeyInput.value.trim(),
     asrLanguage: asrLanguageInput.value.trim(),
@@ -600,7 +775,24 @@ async function saveAllSettings() {
     transcriptionMode: normalizeTranscriptionMode(appSettings.transcriptionMode)
   });
   await refreshStatus();
-  setStatus("ready", "Settings saved", "API, URL, hotkey, and microphone settings were updated.");
+  setStatus("ready", "设置已保存", "API、URL、快捷键和麦克风设置已更新。");
+}
+
+async function testConnection() {
+  normalizeProviderSettingsDraft();
+  setStatus("transcribing", "正在测试", "正在检查当前 API 配置。");
+  testConnectionBtn.disabled = true;
+  try {
+    await saveAllSettings();
+    const checks = await window.mimoInput.testConnection();
+    const detail = checks.map((check) => `${check.name}：${check.detail}`).join("；");
+    setStatus("ready", "连接可用", detail);
+  } catch (error) {
+    setStatus("error", "连接测试失败", error.message || String(error));
+  } finally {
+    testConnectionBtn.disabled = false;
+    setButtons("ready");
+  }
 }
 
 function encodeWav(chunks, sampleRate) {
@@ -660,8 +852,36 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
+function float32ToPcm16Base64(input, sourceSampleRate, targetSampleRate = sourceSampleRate) {
+  const samples = resampleFloat32(input, sourceSampleRate, targetSampleRate);
+  const bytes = new Uint8Array(samples.length * 2);
+  const view = new DataView(bytes.buffer);
+  for (let i = 0; i < samples.length; i += 1) {
+    const sample = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+  }
+  return arrayBufferToBase64(bytes.buffer);
+}
+
+function resampleFloat32(input, sourceSampleRate, targetSampleRate) {
+  if (!sourceSampleRate || !targetSampleRate || sourceSampleRate === targetSampleRate) {
+    return input;
+  }
+  const ratio = sourceSampleRate / targetSampleRate;
+  const outputLength = Math.max(1, Math.round(input.length / ratio));
+  const output = new Float32Array(outputLength);
+  for (let i = 0; i < outputLength; i += 1) {
+    const sourceIndex = i * ratio;
+    const index = Math.floor(sourceIndex);
+    const nextIndex = Math.min(index + 1, input.length - 1);
+    const weight = sourceIndex - index;
+    output[i] = input[index] * (1 - weight) + input[nextIndex] * weight;
+  }
+  return output;
+}
+
 recordBtn.addEventListener("click", () => startRecording({ autoSend: false }).catch((error) => {
-  setStatus("error", "Microphone failed", error.message || String(error));
+  setStatus("error", "麦克风打开失败", error.message || String(error));
   setButtons("ready");
   levelMeter.hidden = true;
 }));
@@ -673,9 +893,14 @@ settingsBtn.addEventListener("click", async () => {
 });
 refreshDevicesBtn.addEventListener("click", () => refreshMicrophones({ requestPermission: true }));
 microphoneSelect.addEventListener("change", saveMicrophoneSelection);
+asrProviderSelect.addEventListener("change", normalizeProviderSettingsDraft);
+asrModeSelect.addEventListener("change", normalizeProviderSettingsDraft);
+asrModelInput.addEventListener("blur", normalizeProviderSettingsDraft);
+asrRealtimeModelInput.addEventListener("blur", normalizeProviderSettingsDraft);
 stableModeBtn.addEventListener("click", () => setTranscriptionMode("stable"));
 fastModeBtn.addEventListener("click", () => setTranscriptionMode("fast"));
 saveSettingsBtn.addEventListener("click", saveAllSettings);
+testConnectionBtn.addEventListener("click", testConnection);
 clearApiKeyBtn.addEventListener("click", async () => {
   apiKeyInput.value = "";
   await saveAllSettings();
@@ -708,7 +933,7 @@ window.mimoInput.onHotkeyRecord(() => {
   logRenderer("event: hotkey-record");
   applyWindowMode("recording");
   startRecording({ autoSend: true }).catch((error) => {
-    setStatus("error", "Microphone failed", error.message || String(error));
+    setStatus("error", "麦克风打开失败", error.message || String(error));
     setButtons("ready");
   });
 });
@@ -725,6 +950,16 @@ window.mimoInput.onRecordingCommand((command) => {
 window.mimoInput.onRetryLastVoiceRequest(() => {
   logRenderer("event: retry-last-voice-request");
   retryLastVoiceRequest();
+});
+
+window.mimoInput.onPartialTranscript((text) => {
+  if (!isRecording && !isTranscribing) return;
+  resultText.value = text || "";
+  if (text) {
+    setStatus("recording", "实时结果", text);
+  }
+  scheduleRecordingResize();
+  setButtons(isRecording ? "recording" : "transcribing");
 });
 
 window.mimoInput.onOpenSettings(async () => {

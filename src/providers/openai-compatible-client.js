@@ -11,6 +11,10 @@ function normalizeBaseUrl(url, fallback) {
   return normalized;
 }
 
+function resolveMaybeFunction(value) {
+  return typeof value === "function" ? value() : value;
+}
+
 function createOpenAiCompatibleClient({
   apiKey,
   baseUrl,
@@ -20,11 +24,20 @@ function createOpenAiCompatibleClient({
   headerValuePrefix = "Bearer "
 }) {
   function resolveApiKey() {
-    return apiKey || "";
+    return resolveMaybeFunction(apiKey) || "";
   }
 
   function resolveBaseUrl() {
-    return normalizeBaseUrl(baseUrl, "https://api.openai.com/v1");
+    return normalizeBaseUrl(resolveMaybeFunction(baseUrl), "https://api.openai.com/v1");
+  }
+
+  function resolveModel() {
+    return resolveMaybeFunction(model) || "";
+  }
+
+  function resolveRequestTimeoutMs() {
+    const timeoutMs = Number(resolveMaybeFunction(requestTimeoutMs));
+    return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 60000;
   }
 
   async function requestChat(messages, { extraBody = {}, maxTokens = 1024 } = {}) {
@@ -34,7 +47,7 @@ function createOpenAiCompatibleClient({
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+    const timer = setTimeout(() => controller.abort(), resolveRequestTimeoutMs());
     const headers = {
       "Content-Type": "application/json"
     };
@@ -46,7 +59,7 @@ function createOpenAiCompatibleClient({
         signal: controller.signal,
         headers,
         body: JSON.stringify({
-          model,
+          model: resolveModel(),
           messages,
           max_completion_tokens: maxTokens,
           temperature: 0,
@@ -76,6 +89,7 @@ function createOpenAiCompatibleClient({
   return {
     requestChat,
     resolveApiKey,
+    resolveModel,
     resolveBaseUrl
   };
 }

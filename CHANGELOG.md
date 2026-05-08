@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Changed
+
+- Renamed the project from MiMo Voice Input to Open Voice Input to reflect the new provider-agnostic direction.
+- Updated README files, package metadata, app title, logs, and double-click launch script names.
+
+### Added
+
+- Added Fun-ASR as an ASR provider alongside MiMo and Qwen3-ASR.
+- Added Fun-ASR realtime WebSocket support for local microphone recordings.
+- Added Fun-ASR REST batch scaffolding for public audio URLs.
+- Added OpenAI-compatible text cleanup as a separate second-stage cleaner option.
+
 ### Fixed
 
 - Added a recording key fallback in the main process so `Enter` can stop recording even when the floating recording popup fails to receive keyboard focus.

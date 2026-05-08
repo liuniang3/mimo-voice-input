@@ -1,4 +1,5 @@
 const { cleanTranscript } = require("../transcript-cleaner");
+const { createFunAsrProvider, FUN_ASR_REST_BASE_URL, normalizeFunAsrModel } = require("./asr/fun-asr-provider");
 const { createMimoAsrProvider } = require("./asr/mimo-asr-provider");
 const { createQwen3AsrProvider } = require("./asr/qwen3-asr-provider");
 const { createMimoCleanerProvider } = require("./cleaner/mimo-cleaner-provider");
@@ -6,10 +7,14 @@ const { createOpenAiCompatibleCleanerProvider } = require("./cleaner/openai-comp
 const { createMimoClient } = require("./mimo-client");
 const { createOpenAiCompatibleClient, normalizeBaseUrl } = require("./openai-compatible-client");
 
+const QWEN_ASR_OPENAI_MODEL = "qwen3-asr-flash";
+const QWEN_ASR_OPENAI_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+const QWEN_ASR_MODES = new Set(["batch", "realtime"]);
+
 function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) {
   const mimoClient = createMimoClient({ getSettings, cleanTranscript });
   const qwenAsrClient = createOpenAiCompatibleClient({
-    apiKey: resolveQwenAsrApiKey,
+    apiKey: resolveDashScopeAsrApiKey,
     baseUrl: resolveQwenAsrBaseUrl,
     model: resolveQwenAsrModel,
     requestTimeoutMs: resolveRequestTimeoutMs
@@ -32,6 +37,23 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
           language: settings.asrLanguage || ""
         };
       }
+    }),
+    "fun-asr": createFunAsrProvider({
+      apiKey: resolveDashScopeAsrApiKey,
+      baseUrl: resolveFunAsrBaseUrl,
+      model: resolveFunAsrModel,
+      realtimeModel: resolveFunAsrRealtimeModel,
+      requestTimeoutMs: resolveRequestTimeoutMs,
+      cleanTranscript,
+      onLog: logEvent,
+      getOptions: () => {
+        const settings = getSettings();
+        return {
+          enableItn: Boolean(settings.asrEnableItn),
+          enableSemanticPunctuation: normalizeQwenAsrMode(settings.asrMode) !== "realtime",
+          language: settings.asrLanguage || ""
+        };
+      }
     })
   };
   const cleanerProviders = providerOverrides.cleanerProviders || {
@@ -46,7 +68,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
     return mode === "fast" ? "fast" : "stable";
   }
 
-  async function transcribe({ audioDataUrl, shortContext, transcriptionMode }) {
+  async function transcribe({ audioDataUrl, pcm16Base64, shortContext, transcriptionMode }) {
     const settings = getSettings();
     const mode = normalizeTranscriptionMode(transcriptionMode || settings.transcriptionMode);
     const asrProvider = resolveAsrProvider(settings);
@@ -54,11 +76,11 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
     logEvent?.("voice-pipeline: mode", `${mode} asr=${asrProvider.id}:${asrProvider.kind || "audio-chat"} cleaner=${cleanerProvider.id}`);
 
     if (mode === "fast") {
-      const fastResult = await asrProvider.transcribeFast({ audioDataUrl, shortContext });
+      const fastResult = await asrProvider.transcribeFast({ audioDataUrl, pcm16Base64, shortContext });
       return cleanTranscript(fastResult.text);
     }
 
-    const rawResult = await asrProvider.transcribeRaw({ audioDataUrl, shortContext });
+    const rawResult = await asrProvider.transcribeRaw({ audioDataUrl, pcm16Base64, shortContext });
     const rawTranscript = cleanTranscript(rawResult.text);
     if (!rawTranscript) return "";
 
@@ -66,12 +88,81 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
     return cleanedResult.text || rawTranscript;
   }
 
+  async function cleanText({ rawText, shortContext }) {
+    const text = cleanTranscript(rawText);
+    if (!text) return "";
+    const settings = getSettings();
+    const cleanerProvider = resolveCleanerProvider(settings);
+    const cleanedResult = await cleanerProvider.clean({ rawText: text, shortContext });
+    return cleanedResult.text || text;
+  }
+
+  async function testConnection() {
+    const settings = getSettings();
+    const asrProvider = resolveAsrProvider(settings);
+    const cleanerProvider = resolveCleanerProvider(settings);
+    const checks = [];
+
+    checks.push({
+      name: "语音识别",
+      ok: Boolean(resolveApiKey()),
+      detail: `${asrProvider.id} · ${resolveBaseUrl()}`
+    });
+
+    checks.push({
+      name: "文本清理",
+      ok: settings.transcriptionMode === "fast" || Boolean(resolveCleanerApiKey()),
+      detail: settings.transcriptionMode === "fast"
+        ? "快速模式不调用二次清理"
+        : `${cleanerProvider.id} · ${resolveCleanerBaseUrl()}`
+    });
+
+    const failed = checks.find((check) => !check.ok);
+    if (failed) {
+      throw new Error(`${failed.name}连接配置不完整：${failed.detail}`);
+    }
+
+    if (typeof asrProvider.testConnection === "function") {
+      await asrProvider.testConnection();
+    } else if (settings.asrProvider === "qwen3-asr" && normalizeQwenAsrMode(settings.asrMode) === "batch") {
+      await qwenAsrClient.requestChat(
+        [
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_audio",
+                input_audio: {
+                  data: "https://dashscope.oss-cn-beijing.aliyuncs.com/audios/welcome.mp3"
+                }
+              }
+            ]
+          }
+        ],
+        { maxTokens: 64 }
+      );
+    } else if (settings.cleanerProvider === "openai-compatible" && settings.transcriptionMode !== "fast") {
+      await openAiCleanerClient.requestChat(
+        [
+          { role: "system", content: "Return exactly {\"text\":\"ok\"}." },
+          { role: "user", content: "ok" }
+        ],
+        { maxTokens: 32 }
+      );
+    }
+
+    return checks;
+  }
+
   return {
     cleanerProviders,
     asrProviders,
+    cleanText,
     normalizeTranscriptionMode,
+    normalizeQwenAsrMode,
     resolveApiKey,
     resolveBaseUrl,
+    testConnection,
     transcribe
   };
 
@@ -85,13 +176,14 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
 
   function resolveApiKey() {
     const settings = getSettings();
-    if (settings.asrProvider === "qwen3-asr") return resolveQwenAsrApiKey();
+    if (settings.asrProvider === "qwen3-asr" || settings.asrProvider === "fun-asr") return resolveDashScopeAsrApiKey();
     return mimoClient.resolveApiKey();
   }
 
   function resolveBaseUrl() {
     const settings = getSettings();
     if (settings.asrProvider === "qwen3-asr") return qwenAsrClient.resolveBaseUrl();
+    if (settings.asrProvider === "fun-asr") return resolveFunAsrBaseUrl();
     return mimoClient.resolveBaseUrl(mimoClient.resolveApiKey());
   }
 
@@ -99,18 +191,31 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
     return getSettings().requestTimeoutMs || 60000;
   }
 
-  function resolveQwenAsrApiKey() {
+  function resolveDashScopeAsrApiKey() {
     const settings = getSettings();
     return settings.asrApiKey || process.env.QWEN_ASR_API_KEY || process.env.DASHSCOPE_API_KEY || settings.apiKey || process.env.MIMO_API_KEY || "";
   }
 
   function resolveQwenAsrBaseUrl() {
     const settings = getSettings();
-    return normalizeBaseUrl(settings.asrBaseUrl || process.env.QWEN_ASR_BASE_URL || process.env.DASHSCOPE_BASE_URL, "https://dashscope.aliyuncs.com/compatible-mode/v1");
+    return normalizeBaseUrl(settings.asrBaseUrl || process.env.QWEN_ASR_BASE_URL || process.env.DASHSCOPE_BASE_URL, QWEN_ASR_OPENAI_BASE_URL);
   }
 
   function resolveQwenAsrModel() {
-    return getSettings().asrModel || "qwen3-asr-flash";
+    return normalizeQwenAsrModel(getSettings().asrModel);
+  }
+
+  function resolveFunAsrBaseUrl() {
+    const settings = getSettings();
+    return normalizeBaseUrl(settings.asrBaseUrl || process.env.FUN_ASR_BASE_URL || process.env.DASHSCOPE_BASE_URL, FUN_ASR_REST_BASE_URL);
+  }
+
+  function resolveFunAsrModel() {
+    return normalizeFunAsrModel(getSettings().asrModel);
+  }
+
+  function resolveFunAsrRealtimeModel() {
+    return getSettings().asrRealtimeModel || "fun-asr-realtime";
   }
 
   function resolveCleanerApiKey() {
@@ -128,4 +233,21 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
   }
 }
 
-module.exports = { createVoicePipeline };
+function normalizeQwenAsrMode(mode) {
+  return QWEN_ASR_MODES.has(mode) ? mode : "batch";
+}
+
+function normalizeQwenAsrModel(model) {
+  const value = String(model || "").trim();
+  if (!value || value === "mimo-v2.5") return QWEN_ASR_OPENAI_MODEL;
+  if (value.includes("realtime") || value.includes("filetrans")) return QWEN_ASR_OPENAI_MODEL;
+  return value;
+}
+
+module.exports = {
+  createVoicePipeline,
+  normalizeQwenAsrModel,
+  QWEN_ASR_OPENAI_BASE_URL,
+  QWEN_ASR_OPENAI_MODEL,
+  normalizeQwenAsrMode
+};

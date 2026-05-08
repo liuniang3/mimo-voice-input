@@ -1,8 +1,8 @@
 {
-  "name": "mimo-voice-input",
-  "productName": "基于小米 MiMo V2.5 的语音输入法",
+  "name": "open-voice-input",
+  "productName": "Open Voice Input",
   "version": "0.1.0",
-  "description": "Windows voice input assistant powered by Xiaomi MiMo multimodal API.",
+  "description": "Windows voice input assistant with pluggable ASR providers and optional LLM cleanup.",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -11,7 +11,9 @@
     "test:pipeline": "node scripts/test-voice-pipeline.js"
   },
   "keywords": [
-    "mimo",
+    "asr",
+    "speech-to-text",
+    "llm-cleanup",
     "voice-input",
     "dictation",
     "windows"
@@ -21,5 +23,8 @@
   "private": true,
   "devDependencies": {
     "electron": "^39.2.6"
+  },
+  "dependencies": {
+    "ws": "^8.20.0"
   }
 }

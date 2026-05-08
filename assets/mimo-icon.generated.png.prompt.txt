@@ -1,4 +1,4 @@
-### Design - MiMo Voice Input Tray Icon
+### Design - Open Voice Input Tray Icon
 
 Type: app icon / tray icon
 Platform or ratio: 1:1 square, Windows tray and app icon, optimized for 16px, 32px, 64px, 256px
@@ -6,7 +6,7 @@ Palette: deep ink #111827, clear cyan #38D5FF, voice blue #2563EB, clean white #
 Text: no text
 
 ```text
-A polished finished design asset for MiMo Voice Input, a compact Windows voice dictation input method.
+A polished finished design asset for Open Voice Input, a compact Windows voice dictation assistant.
 
 CANVAS AND COMPOSITION:
 Square icon composition on a transparent background, centered geometric mark with strong silhouette readability at very small sizes. Use a rounded microphone capsule as the central anchor, with a subtle text-caret shape integrated into the microphone stem and two short sound-wave arcs framing the upper sides. Keep generous outer padding so the icon is legible in the Windows taskbar tray.

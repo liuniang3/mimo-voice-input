@@ -46,14 +46,28 @@ function cleanTranscript(value) {
 }
 
 function removeDeterministicFillers(value) {
-  return value
-    .replace(/(^|[，,。.!！?？；;：:\s])(?:呃|额|嗯|唔|啊|呃呃|嗯嗯|额额)(?=($|[，,。.!！?？；;：:\s]))/g, "$1")
-    .replace(/(^|[，,。.!！?？；;：:\s])(?:呃|额|嗯|唔|啊|呃呃|嗯嗯|额额)(?=(?:现在|目前|这个|那个|就是|我们|我|你|他|它|再|然后|所以|如果|比如|但是|不过|还有|应该|可以|需要|希望|按|用|在|的))/g, "$1")
-    .replace(/(^|[，,。.!！?？；;：:\s])(?:呃|额|嗯|唔|啊){2,}(?=\S)/g, "$1")
+  return collapseRepeatedFragments(value)
+    .replace(/(^|[，,。.!！?？；;：:\s])(?:呃|额|嗯|唔|啊|哦|呃呃|嗯嗯|额额|哦哦)(?=($|[，,。.!！?？；;：:\s]))/g, "$1")
+    .replace(/(^|[，,。.!！?？；;：:\s])(?:呃|额|嗯|唔|啊|哦|呃呃|嗯嗯|额额|哦哦)(?=(?:现在|目前|这个|那个|就是|我们|我|你|他|它|再|然后|所以|如果|比如|但是|不过|还有|应该|可以|需要|希望|按|用|在|的))/g, "$1")
+    .replace(/(^|[，,。.!！?？；;：:\s])(?:呃|额|嗯|唔|啊|哦){2,}(?=\S)/g, "$1")
+    .replace(/(^|[，,。.!！?？；;：:\s])(?:就是|然后)(?=(?:这个|那个|我们|我|你|他|它|现在|目前|再|所以|如果|比如|但是|不过|还有|应该|可以|需要|希望|按|用|在))/g, "$1")
     .replace(/\s+([，,。.!！?？；;：:])/g, "$1")
     .replace(/([，,。.!！?？；;：:])\s+/g, "$1")
     .replace(/([，,。.!！?？；;：:]){2,}/g, "$1")
     .trim();
+}
+
+function collapseRepeatedFragments(value) {
+  let text = String(value || "");
+  for (let i = 0; i < 3; i += 1) {
+    const previous = text;
+    text = text
+      .replace(/([\u4e00-\u9fff]{1,4})\1+/g, "$1")
+      .replace(/([\u4e00-\u9fff]{2,12})(?:[，,、\s]*\1)+/g, "$1")
+      .replace(/([，,。.!！?？；;：:\s])([\u4e00-\u9fff]{2,16})[，,、\s]+\2(?=([，,。.!！?？；;：:\s]|$))/g, "$1$2");
+    if (text === previous) break;
+  }
+  return text;
 }
 
 function ensureTerminalPunctuation(value) {

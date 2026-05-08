@@ -11,6 +11,11 @@
 
 body {
   margin: 0;
+  background: transparent;
+}
+
+body.settings-open,
+body:not(.recording-mode):not(.settings-open) {
   background: #101418;
 }
 
@@ -26,28 +31,87 @@ body {
   -webkit-app-region: drag;
 }
 
+body:not(.recording-mode) .shell {
+  border-radius: 0;
+  background: #101418;
+}
+
 body.recording-mode .topbar,
 body.recording-mode .advanced-field,
-body.recording-mode footer,
-body.recording-mode #statusDetail {
+body.recording-mode footer {
   display: none;
 }
 
 body.recording-mode .shell {
-  padding: 10px 12px;
-  justify-content: center;
+  padding: 12px 14px;
+  justify-content: flex-start;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(232, 246, 243, 0.68)),
+    rgba(246, 250, 248, 0.7);
+  box-shadow:
+    0 2px 10px rgba(255, 255, 255, 0.26) inset,
+    inset 0 1px 0 rgba(255, 255, 255, 0.84);
+  backdrop-filter: blur(26px) saturate(1.35);
+  -webkit-backdrop-filter: blur(26px) saturate(1.35);
 }
 
 body.recording-mode .status-panel {
-  min-height: 52px;
-  padding: 10px 12px;
-  grid-template-columns: 18px 1fr;
+  min-height: 88px;
+  height: 100%;
+  padding: 0;
+  grid-template-columns: 16px 1fr;
+  align-items: start;
+  gap: 11px;
   border: none;
   background: transparent;
 }
 
 body.recording-mode #statusTitle {
-  font-size: 18px;
+  color: #17312f;
+  font-size: 13px;
+  font-weight: 680;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.62);
+}
+
+body.recording-mode #statusDetail {
+  display: block;
+  max-height: calc(100vh - 46px);
+  margin-top: 7px;
+  padding-right: 3px;
+  overflow-y: auto;
+  color: rgba(29, 46, 44, 0.94);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.42;
+  word-break: break-word;
+  white-space: pre-wrap;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(39, 115, 101, 0.3) transparent;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+body.recording-mode #statusDetail::-webkit-scrollbar {
+  width: 6px;
+}
+
+body.recording-mode #statusDetail::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(39, 115, 101, 0.24);
+}
+
+body.recording-mode .pulse {
+  width: 12px;
+  height: 12px;
+  margin-top: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  box-shadow:
+    0 0 0 4px rgba(255, 255, 255, 0.42),
+    0 0 18px rgba(41, 179, 137, 0.28);
 }
 
 .topbar {

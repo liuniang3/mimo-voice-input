@@ -4,15 +4,18 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { createVoicePipeline } = require("./providers/voice-pipeline");
+const { createQwenRealtimeSession } = require("./providers/asr/qwen-realtime-session");
+const { createFunAsrRealtimeSession } = require("./providers/asr/fun-asr-realtime-session");
 
 const APP_ICON_PATH = path.join(__dirname, "..", "assets", "mimo-icon.ico");
 const TRAY_ICON_PATH = path.join(__dirname, "..", "assets", "mimo-tray.png");
 const HOTKEY_HELPER_PATH = path.join(__dirname, "win-hotkey-helper.ps1");
-const APP_DISPLAY_NAME = "基于小米 MiMo V2.5 的语音输入法";
+const APP_DISPLAY_NAME = "Open Voice Input";
 const FALLBACK_TRAY_ICON_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 const WINDOW_SIZES = {
-  recording: { width: 220, height: 74 },
+  recording: { width: 320, height: 112 },
+  recordingMax: { width: 520, height: 420 },
   compact: { width: 220, height: 74 },
   settings: { width: 500, height: 620 }
 };
@@ -23,7 +26,9 @@ const DEFAULT_SETTINGS = {
   apiKey: "",
   baseUrl: "",
   asrProvider: "mimo",
+  asrMode: "batch",
   asrModel: "mimo-v2.5",
+  asrRealtimeModel: "qwen3-asr-flash-realtime",
   asrApiKey: "",
   asrBaseUrl: "",
   asrLanguage: "",
@@ -50,13 +55,14 @@ let windowMode = "compact";
 let targetWindowHandle = "";
 let recordingKeyFallbacksActive = false;
 let voicePipeline;
+let realtimeSession;
 const singleInstanceLock = app.requestSingleInstanceLock();
 
 function logEvent(message, detail = "") {
   try {
     const line = `[${new Date().toISOString()}] ${message}${detail ? ` ${detail}` : ""}\n`;
     fs.mkdir(app.getPath("userData"), { recursive: true })
-      .then(() => fs.appendFile(path.join(app.getPath("userData"), "mimo.log"), line, "utf8"))
+      .then(() => fs.appendFile(path.join(app.getPath("userData"), "open-voice-input.log"), line, "utf8"))
       .catch(() => {});
   } catch {
     // Logging must never affect the voice input flow.
@@ -90,6 +96,7 @@ async function loadSettings() {
 async function saveSettings(nextSettings) {
   settings = { ...settings, ...nextSettings };
   settings.transcriptionMode = normalizeTranscriptionMode(settings.transcriptionMode);
+  settings.asrMode = normalizeAsrMode(settings.asrMode);
   await fs.mkdir(app.getPath("userData"), { recursive: true });
   await fs.writeFile(settingsPath(), JSON.stringify(settings, null, 2), "utf8");
   await registerHotkey();
@@ -98,6 +105,10 @@ async function saveSettings(nextSettings) {
 
 function normalizeTranscriptionMode(mode) {
   return voicePipeline?.normalizeTranscriptionMode(mode) || (mode === "fast" ? "fast" : "stable");
+}
+
+function normalizeAsrMode(mode) {
+  return voicePipeline?.normalizeQwenAsrMode?.(mode) || (mode === "realtime" ? "realtime" : "batch");
 }
 
 function createWindow() {
@@ -111,7 +122,8 @@ function createWindow() {
     resizable: false,
     skipTaskbar: true,
     icon: APP_ICON_PATH,
-    backgroundColor: "#101418",
+    transparent: true,
+    backgroundColor: "#00000000",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -136,7 +148,8 @@ function createSettingsWindow() {
     resizable: false,
     skipTaskbar: true,
     icon: APP_ICON_PATH,
-    backgroundColor: "#101418",
+    transparent: true,
+    backgroundColor: "#00000000",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -211,6 +224,21 @@ function enforceWindowGeometry(win, mode = windowMode) {
   win.setContentSize(size.width, size.height, false);
   win.setBounds({ ...win.getBounds(), width: size.width, height: size.height }, false);
   logEvent("window: geometry", `${mode} ${JSON.stringify(win.getBounds())}`);
+}
+
+function resizeRecordingWindow({ width, height } = {}) {
+  if (!mainWindow || mainWindow.isDestroyed() || windowMode !== "recording") return;
+  const min = WINDOW_SIZES.recording;
+  const max = WINDOW_SIZES.recordingMax;
+  const nextWidth = clamp(Number(width) || min.width, min.width, max.width);
+  const nextHeight = clamp(Number(height) || min.height, min.height, max.height);
+  mainWindow.setContentSize(nextWidth, nextHeight, false);
+  mainWindow.setBounds({ ...mainWindow.getBounds(), width: nextWidth, height: nextHeight }, false);
+  logEvent("window: recording resize", `${nextWidth}x${nextHeight}`);
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, Math.round(value)));
 }
 
 function prepareWindowForDisplay(win = mainWindow, mode = windowMode) {
@@ -518,13 +546,13 @@ function createTray() {
   tray = new Tray(image);
   tray.setToolTip(APP_DISPLAY_NAME);
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Show", click: showWindowOnly },
-    { label: "Settings", click: showSettings },
-    { label: "Record", click: showAndStart },
-    { label: "Retry last request", click: retryLastVoiceRequest },
-    { label: "Hide", click: () => hideWindow() },
+    { label: "显示", click: showWindowOnly },
+    { label: "设置", click: showSettings },
+    { label: "开始录音", click: showAndStart },
+    { label: "重试上一次转写", click: retryLastVoiceRequest },
+    { label: "隐藏", click: () => hideWindow() },
     { type: "separator" },
-    { label: "Quit", click: () => app.quit() }
+    { label: "退出", click: () => app.quit() }
   ]));
   tray.on("click", showWindowOnly);
   logEvent("tray: created");
@@ -543,6 +571,72 @@ function resolveApiKey() {
 
 function resolveBaseUrl(apiKey) {
   return voicePipeline?.resolveBaseUrl(apiKey) || "https://api.xiaomimimo.com/v1";
+}
+
+function qwenRealtimeSettings() {
+  return {
+    apiKey: settings.asrApiKey || process.env.QWEN_ASR_API_KEY || process.env.DASHSCOPE_API_KEY || settings.apiKey || process.env.MIMO_API_KEY || "",
+    model: settings.asrRealtimeModel || settings.asrModel || "qwen3-asr-flash-realtime",
+    language: settings.asrLanguage || "",
+    enableItn: Boolean(settings.asrEnableItn)
+  };
+}
+
+function funRealtimeSettings() {
+  return {
+    apiKey: settings.asrApiKey || process.env.FUN_ASR_API_KEY || process.env.DASHSCOPE_API_KEY || settings.apiKey || process.env.MIMO_API_KEY || "",
+    model: settings.asrRealtimeModel || settings.asrModel || "fun-asr-realtime",
+    language: settings.asrLanguage || "",
+    semanticPunctuation: normalizeTranscriptionMode(settings.transcriptionMode) === "stable"
+  };
+}
+
+async function startRealtimeAsr(event) {
+  stopRealtimeAsr();
+  if (normalizeAsrMode(settings.asrMode) !== "realtime") {
+    return { enabled: false };
+  }
+
+  if (settings.asrProvider === "qwen3-asr") {
+    realtimeSession = createQwenRealtimeSession({
+      ...qwenRealtimeSettings(),
+      onPartial: (text) => event.sender.send("voice:partial-transcript", text),
+      onFinal: (text) => event.sender.send("voice:partial-transcript", text),
+      onLog: logEvent
+    });
+  } else if (settings.asrProvider === "fun-asr") {
+    realtimeSession = createFunAsrRealtimeSession({
+      ...funRealtimeSettings(),
+      onPartial: (text) => event.sender.send("voice:partial-transcript", text),
+      onFinal: (text) => event.sender.send("voice:partial-transcript", text),
+      onLog: logEvent
+    });
+  } else {
+    return { enabled: false };
+  }
+  await realtimeSession.ready;
+  return { enabled: true, model: realtimeSession.model };
+}
+
+function appendRealtimeAudio(base64Audio) {
+  realtimeSession?.appendPcm16Base64(base64Audio);
+}
+
+async function finishRealtimeAsr({ shortContext = "", transcriptionMode } = {}) {
+  if (!realtimeSession) return "";
+  const session = realtimeSession;
+  realtimeSession = null;
+  const rawText = await session.finish();
+  logEvent("qwen-realtime: final text", `chars=${rawText.length}`);
+  if (normalizeTranscriptionMode(transcriptionMode || settings.transcriptionMode) === "stable") {
+    return voicePipeline.cleanText({ rawText, shortContext });
+  }
+  return rawText;
+}
+
+function stopRealtimeAsr() {
+  realtimeSession?.close();
+  realtimeSession = null;
 }
 
 function sendPasteKeystroke() {
@@ -611,6 +705,7 @@ ipcMain.handle("window:compact", async (_event, isCompact) => {
   }
 });
 ipcMain.handle("window:settings", async () => showSettings());
+ipcMain.handle("window:recording-resize", async (_event, size) => resizeRecordingWindow(size));
 ipcMain.handle("app:status", async () => ({
   hasApiKey: Boolean(resolveApiKey()),
   hasSavedApiKey: Boolean(settings.apiKey),
@@ -626,6 +721,11 @@ ipcMain.handle("window:hide", async (event) => hideWindow(BrowserWindow.fromWebC
 ipcMain.handle("app:log", async (_event, message, detail) => logEvent(`renderer: ${message}`, detail || ""));
 ipcMain.handle("voice:transcribe", async (_event, payload) => voicePipeline.transcribe(payload));
 ipcMain.handle("mimo:transcribe", async (_event, payload) => voicePipeline.transcribe(payload));
+ipcMain.handle("voice:realtime:start", async (event) => startRealtimeAsr(event));
+ipcMain.handle("voice:realtime:append", async (_event, base64Audio) => appendRealtimeAudio(base64Audio));
+ipcMain.handle("voice:realtime:finish", async (_event, payload) => finishRealtimeAsr(payload));
+ipcMain.handle("voice:realtime:cancel", async () => stopRealtimeAsr());
+ipcMain.handle("connection:test", async () => voicePipeline.testConnection());
 ipcMain.handle("input:inject", async (_event, text) => injectText(text));
 ipcMain.handle("recording:keys:clear", async () => unregisterRecordingKeyFallbacks());
 

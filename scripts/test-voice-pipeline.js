@@ -1,6 +1,9 @@
 const assert = require("node:assert/strict");
 const { createOpenAiCompatibleClient } = require("../src/providers/openai-compatible-client");
-const { createVoicePipeline } = require("../src/providers/voice-pipeline");
+const { normalizeFunAsrModel } = require("../src/providers/asr/fun-asr-provider");
+const { normalizeFunAsrRealtimeModel } = require("../src/providers/asr/fun-asr-realtime-session");
+const { joinTranscript, normalizeQwenRealtimeModel } = require("../src/providers/asr/qwen-realtime-session");
+const { createVoicePipeline, normalizeQwenAsrMode, normalizeQwenAsrModel } = require("../src/providers/voice-pipeline");
 
 async function run() {
   const calls = [];
@@ -101,12 +104,96 @@ async function run() {
   assert.equal(switchedStableText, "qwen raw openai-cleaned");
   assert.deepEqual(calls.filter(([name]) => name !== "log"), [["qwen-raw"], ["openai-clean", "qwen raw"]]);
 
+  calls.length = 0;
+  const realtimeCleanedText = await switchedPipeline.cleanText({
+    rawText: "qwen realtime raw",
+    shortContext: "window title"
+  });
+  assert.equal(realtimeCleanedText, "qwen realtime raw openai-cleaned");
+  assert.deepEqual(calls.filter(([name]) => name !== "log"), [["openai-clean", "qwen realtime raw"]]);
+
+  calls.length = 0;
+  const funPipeline = createVoicePipeline({
+    getSettings: () => ({ asrProvider: "fun-asr", cleanerProvider: "openai-compatible", transcriptionMode: "stable" }),
+    logEvent: (message, detail) => calls.push(["log", message, detail]),
+    providerOverrides: {
+      asrProviders: {
+        mimo: {
+          id: "mimo",
+          transcribeFast: async () => {
+            throw new Error("mimo fast should not run");
+          },
+          transcribeRaw: async () => {
+            throw new Error("mimo raw should not run");
+          }
+        },
+        "fun-asr": {
+          id: "fun-asr",
+          kind: "dedicated-asr",
+          transcribeFast: async ({ pcm16Base64 }) => {
+            calls.push(["fun-fast", pcm16Base64]);
+            return { text: "fun fast" };
+          },
+          transcribeRaw: async () => {
+            calls.push(["fun-raw"]);
+            return { text: "fun raw" };
+          },
+          testConnection: async () => {
+            calls.push(["fun-test"]);
+          }
+        }
+      },
+      cleanerProviders: {
+        mimo: {
+          id: "mimo",
+          clean: async () => {
+            throw new Error("mimo cleaner should not run");
+          }
+        },
+        "openai-compatible": {
+          id: "openai-compatible",
+          clean: async ({ rawText }) => {
+            calls.push(["openai-clean", rawText]);
+            return { text: `${rawText} openai-cleaned` };
+          }
+        }
+      }
+    }
+  });
+
+  const funFastText = await funPipeline.transcribe({
+    audioDataUrl: "data:audio/wav;base64,test",
+    pcm16Base64: "pcm-test",
+    transcriptionMode: "fast"
+  });
+  assert.equal(funFastText, "fun fast");
+  assert.deepEqual(calls.filter(([name]) => name !== "log"), [["fun-fast", "pcm-test"]]);
+
   const client = createOpenAiCompatibleClient({
     apiKey: "test",
     baseUrl: "https://example.com",
     model: "test-model"
   });
   assert.equal(client.resolveBaseUrl(), "https://example.com/v1");
+  assert.equal(normalizeQwenAsrModel(""), "qwen3-asr-flash");
+  assert.equal(normalizeQwenAsrModel("mimo-v2.5"), "qwen3-asr-flash");
+  assert.equal(normalizeQwenAsrModel("qwen3-asr-flash-realtime-2026-02-10"), "qwen3-asr-flash");
+  assert.equal(normalizeQwenAsrModel("qwen3-asr-flash"), "qwen3-asr-flash");
+  assert.equal(normalizeQwenAsrMode("realtime"), "realtime");
+  assert.equal(normalizeQwenAsrMode("unknown"), "batch");
+  assert.equal(normalizeQwenRealtimeModel(""), "qwen3-asr-flash-realtime");
+  assert.equal(normalizeQwenRealtimeModel("qwen3-asr-flash"), "qwen3-asr-flash-realtime");
+  assert.equal(normalizeQwenRealtimeModel("qwen3-asr-flash-realtime-2026-02-10"), "qwen3-asr-flash-realtime-2026-02-10");
+  assert.equal(normalizeFunAsrModel(""), "fun-asr");
+  assert.equal(normalizeFunAsrModel("mimo-v2.5"), "fun-asr");
+  assert.equal(normalizeFunAsrModel("fun-asr-realtime-2026-02-10"), "fun-asr");
+  assert.equal(normalizeFunAsrModel("fun-asr-2026-02-10"), "fun-asr-2026-02-10");
+  assert.equal(normalizeFunAsrRealtimeModel(""), "fun-asr-realtime");
+  assert.equal(normalizeFunAsrRealtimeModel("fun-asr"), "fun-asr-realtime");
+  assert.equal(normalizeFunAsrRealtimeModel("fun-asr-realtime-2026-02-10"), "fun-asr-realtime-2026-02-10");
+  assert.equal(joinTranscript("第一句。", "第二句。"), "第一句。第二句。");
+  assert.equal(joinTranscript("hello", "world"), "hello world");
+  assert.equal(joinTranscript("第一句。第二句。", "第二句。"), "第一句。第二句。");
 
   console.log("voice pipeline tests passed");
 }
