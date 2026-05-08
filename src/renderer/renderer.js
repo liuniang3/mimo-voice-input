@@ -19,6 +19,16 @@ const refreshDevicesBtn = document.getElementById("refreshDevicesBtn");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const apiKeyInput = document.getElementById("apiKeyInput");
 const baseUrlInput = document.getElementById("baseUrlInput");
+const asrProviderSelect = document.getElementById("asrProviderSelect");
+const asrModelInput = document.getElementById("asrModelInput");
+const asrBaseUrlInput = document.getElementById("asrBaseUrlInput");
+const asrApiKeyInput = document.getElementById("asrApiKeyInput");
+const asrLanguageInput = document.getElementById("asrLanguageInput");
+const asrEnableItnInput = document.getElementById("asrEnableItnInput");
+const cleanerProviderSelect = document.getElementById("cleanerProviderSelect");
+const cleanerModelInput = document.getElementById("cleanerModelInput");
+const cleanerBaseUrlInput = document.getElementById("cleanerBaseUrlInput");
+const cleanerApiKeyInput = document.getElementById("cleanerApiKeyInput");
 const hotkeyInput = document.getElementById("hotkeyInput");
 const hotkeyHint = document.getElementById("hotkeyHint");
 const stableModeBtn = document.getElementById("stableModeBtn");
@@ -528,6 +538,16 @@ function fillSettingsForm(status) {
     ? "Using MIMO_API_KEY environment variable"
     : "Paste MiMo API key or token plan key";
   baseUrlInput.value = appSettings.baseUrl || "";
+  asrProviderSelect.value = appSettings.asrProvider || "mimo";
+  asrModelInput.value = appSettings.asrModel || appSettings.model || "mimo-v2.5";
+  asrBaseUrlInput.value = appSettings.asrBaseUrl || "";
+  asrApiKeyInput.value = appSettings.asrApiKey || "";
+  asrLanguageInput.value = appSettings.asrLanguage || "";
+  asrEnableItnInput.checked = Boolean(appSettings.asrEnableItn);
+  cleanerProviderSelect.value = appSettings.cleanerProvider || "mimo";
+  cleanerModelInput.value = appSettings.cleanerModel || appSettings.model || "mimo-v2.5";
+  cleanerBaseUrlInput.value = appSettings.cleanerBaseUrl || "";
+  cleanerApiKeyInput.value = appSettings.cleanerApiKey || "";
   hotkeyInput.value = appSettings.hotkey || "CommandOrControl+Alt+M";
   renderTranscriptionMode(normalizeTranscriptionMode(appSettings.transcriptionMode));
 }
@@ -565,6 +585,16 @@ async function saveAllSettings() {
   appSettings = await window.mimoInput.saveSettings({
     apiKey: apiKeyInput.value.trim(),
     baseUrl: baseUrlInput.value.trim(),
+    asrProvider: asrProviderSelect.value,
+    asrModel: asrModelInput.value.trim(),
+    asrBaseUrl: asrBaseUrlInput.value.trim(),
+    asrApiKey: asrApiKeyInput.value.trim(),
+    asrLanguage: asrLanguageInput.value.trim(),
+    asrEnableItn: asrEnableItnInput.checked,
+    cleanerProvider: cleanerProviderSelect.value,
+    cleanerModel: cleanerModelInput.value.trim(),
+    cleanerBaseUrl: cleanerBaseUrlInput.value.trim(),
+    cleanerApiKey: cleanerApiKeyInput.value.trim(),
     hotkey: hotkeyInput.value.trim() || "CommandOrControl+Alt+M",
     microphoneDeviceId: microphoneSelect.value,
     transcriptionMode: normalizeTranscriptionMode(appSettings.transcriptionMode)

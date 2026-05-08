@@ -49,6 +49,58 @@
           <input id="baseUrlInput" type="text" placeholder="Auto, or https://token-plan-cn.xiaomimimo.com/v1" />
         </label>
         <label class="field">
+          <span>ASR Provider</span>
+          <select id="asrProviderSelect">
+            <option value="mimo">MiMo audio understanding</option>
+            <option value="qwen3-asr">Qwen3-ASR dedicated ASR</option>
+          </select>
+        </label>
+        <div class="provider-grid">
+          <label class="field">
+            <span>ASR Model</span>
+            <input id="asrModelInput" type="text" placeholder="mimo-v2.5 or qwen3-asr-flash" />
+          </label>
+          <label class="field">
+            <span>ASR Base URL</span>
+            <input id="asrBaseUrlInput" type="text" placeholder="Provider default" />
+          </label>
+        </div>
+        <label class="field">
+          <span>ASR API Key</span>
+          <input id="asrApiKeyInput" type="password" placeholder="Leave empty to reuse main API key" />
+        </label>
+        <div class="provider-grid">
+          <label class="field">
+            <span>ASR Language</span>
+            <input id="asrLanguageInput" type="text" placeholder="Optional, e.g. zh or en" />
+          </label>
+          <label class="check-field">
+            <input id="asrEnableItnInput" type="checkbox" />
+            <span>Enable ASR inverse text normalization</span>
+          </label>
+        </div>
+        <label class="field">
+          <span>Cleanup Provider</span>
+          <select id="cleanerProviderSelect">
+            <option value="mimo">MiMo chat cleanup</option>
+            <option value="openai-compatible">OpenAI-compatible cleanup</option>
+          </select>
+        </label>
+        <div class="provider-grid">
+          <label class="field">
+            <span>Cleanup Model</span>
+            <input id="cleanerModelInput" type="text" placeholder="mimo-v2.5 or gpt-5.4-mini" />
+          </label>
+          <label class="field">
+            <span>Cleanup Base URL</span>
+            <input id="cleanerBaseUrlInput" type="text" placeholder="https://api.openai.com/v1 or compatible host" />
+          </label>
+        </div>
+        <label class="field">
+          <span>Cleanup API Key</span>
+          <input id="cleanerApiKeyInput" type="password" placeholder="Leave empty to reuse main API key" />
+        </label>
+        <label class="field">
           <span>Global hotkey</span>
           <input id="hotkeyInput" type="text" placeholder="CommandOrControl+Alt+M" autocomplete="off" />
           <small id="hotkeyHint" class="hotkey-hint" hidden>按下新的快捷键组合</small>

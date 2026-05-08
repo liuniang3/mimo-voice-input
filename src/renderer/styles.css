@@ -342,6 +342,28 @@ footer {
   gap: 8px;
 }
 
+.provider-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.check-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  color: #aebebb;
+  font-size: 12px;
+  -webkit-app-region: no-drag;
+}
+
+.check-field input {
+  width: 16px;
+  height: 16px;
+}
+
 .actions {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
