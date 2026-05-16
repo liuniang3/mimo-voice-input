@@ -70,6 +70,28 @@ let recordingAsrMode = "batch";
 let lastVoiceRequest = null;
 let resizeTimer = 0;
 
+function createSettingsSnapshot() {
+  return {
+    model: appSettings.model,
+    apiKey: appSettings.apiKey,
+    baseUrl: appSettings.baseUrl,
+    asrProvider: appSettings.asrProvider,
+    asrMode: appSettings.asrMode,
+    asrModel: appSettings.asrModel,
+    asrRealtimeModel: appSettings.asrRealtimeModel,
+    asrApiKey: appSettings.asrApiKey,
+    asrBaseUrl: appSettings.asrBaseUrl,
+    asrLanguage: appSettings.asrLanguage,
+    asrEnableItn: appSettings.asrEnableItn,
+    cleanerProvider: appSettings.cleanerProvider,
+    cleanerModel: appSettings.cleanerModel,
+    cleanerApiKey: appSettings.cleanerApiKey,
+    cleanerBaseUrl: appSettings.cleanerBaseUrl,
+    transcriptionMode: appSettings.transcriptionMode,
+    requestTimeoutMs: appSettings.requestTimeoutMs
+  };
+}
+
 function normalizeTranscriptionMode(mode) {
   return TRANSCRIPTION_MODES.has(mode) ? mode : "stable";
 }
@@ -330,6 +352,17 @@ async function stopRecording() {
   const wavBytes = encodeWav(recordingChunks, recordingSampleRate);
   const pcm16Base64 = float32ToPcm16Base64(flattenFloat32(recordingChunks), recordingSampleRate, 16000);
   const audioDataUrl = `data:audio/wav;base64,${arrayBufferToBase64(wavBytes.buffer)}`;
+  const settingsSnapshot = createSettingsSnapshot();
+  const transcriptionRequest = {
+    audioDataUrl,
+    pcm16Base64,
+    shortContext: recordingShortContext,
+    transcriptionMode,
+    settingsSnapshot,
+    autoSendAfterTranscript
+  };
+  lastVoiceRequest = transcriptionRequest;
+
   if (recordingAsrMode === "realtime") {
     try {
       isTranscribing = true;
@@ -352,15 +385,6 @@ async function stopRecording() {
     recordingShortContext = "";
     return;
   }
-
-  const transcriptionRequest = {
-    audioDataUrl,
-    pcm16Base64,
-    shortContext: recordingShortContext,
-    transcriptionMode,
-    autoSendAfterTranscript
-  };
-  lastVoiceRequest = transcriptionRequest;
 
   await runVoiceRequest(transcriptionRequest, {
     bytes: wavBytes.byteLength,
@@ -395,7 +419,8 @@ async function runVoiceRequest(request, { bytes = 0, retry = false } = {}) {
       audioDataUrl: request.audioDataUrl,
       pcm16Base64: request.pcm16Base64,
       shortContext: request.shortContext,
-      transcriptionMode
+      transcriptionMode,
+      settingsSnapshot: request.settingsSnapshot
     });
     logRenderer(retry ? "mimo: retry done" : "mimo: transcribe done", `chars=${transcript.length}`);
     await handleTranscriptResult(transcript, {
@@ -753,9 +778,9 @@ function applyWindowMode(mode) {
   scheduleRecordingResize();
 }
 
-async function saveAllSettings() {
+async function saveAllSettings({ clearKeys = false } = {}) {
   normalizeProviderSettingsDraft();
-  appSettings = await window.mimoInput.saveSettings({
+  const nextSettings = {
     apiKey: apiKeyInput.value.trim(),
     baseUrl: baseUrlInput.value.trim(),
     asrProvider: asrProviderSelect.value,
@@ -773,6 +798,24 @@ async function saveAllSettings() {
     hotkey: hotkeyInput.value.trim() || "CommandOrControl+Alt+M",
     microphoneDeviceId: microphoneSelect.value,
     transcriptionMode: normalizeTranscriptionMode(appSettings.transcriptionMode)
+  };
+  if (!clearKeys) {
+    const inputBySetting = {
+      apiKey: apiKeyInput,
+      baseUrl: baseUrlInput,
+      asrApiKey: asrApiKeyInput,
+      asrBaseUrl: asrBaseUrlInput,
+      cleanerApiKey: cleanerApiKeyInput,
+      cleanerBaseUrl: cleanerBaseUrlInput
+    };
+    for (const [key, input] of Object.entries(inputBySetting)) {
+      if (!nextSettings[key] && appSettings[key] && document.activeElement !== input) {
+        nextSettings[key] = appSettings[key];
+      }
+    }
+  }
+  appSettings = await window.mimoInput.saveSettings({
+    ...nextSettings
   });
   await refreshStatus();
   setStatus("ready", "设置已保存", "API、URL、快捷键和麦克风设置已更新。");
@@ -903,7 +946,7 @@ saveSettingsBtn.addEventListener("click", saveAllSettings);
 testConnectionBtn.addEventListener("click", testConnection);
 clearApiKeyBtn.addEventListener("click", async () => {
   apiKeyInput.value = "";
-  await saveAllSettings();
+  await saveAllSettings({ clearKeys: true });
 });
 resultText.addEventListener("input", () => setButtons("ready"));
 hotkeyInput.addEventListener("focus", beginHotkeyCapture);

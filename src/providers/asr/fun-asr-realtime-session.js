@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 const WebSocket = require("ws");
 const { cleanTranscript } = require("../../transcript-cleaner");
+const { parseServerSentEventChunks } = require("../openai-compatible-client");
 
 const FUN_ASR_REALTIME_MODEL = "fun-asr-realtime";
 const FUN_ASR_REALTIME_WS_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
@@ -115,14 +116,17 @@ function createFunAsrRealtimeSession({
   }
 
   function handleMessage(raw) {
-    let event;
-    try {
-      event = JSON.parse(raw);
-    } catch {
-      onLog?.("fun-asr-realtime: non-json", raw.slice(0, 200));
+    const events = parseRealtimeEvents(raw);
+    if (!events.length) {
       return;
     }
 
+    for (const event of events) {
+      handleEvent(event, raw);
+    }
+  }
+
+  function handleEvent(event, raw) {
     const eventName = event.header?.event || "";
     if (eventName === "task-started") {
       started = true;
@@ -254,6 +258,20 @@ function createFunAsrRealtimeSession({
   }
 }
 
+function parseRealtimeEvents(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return [];
+  try {
+    return [JSON.parse(text)];
+  } catch {
+    try {
+      return parseServerSentEventChunks(text);
+    } catch {
+      return [];
+    }
+  }
+}
+
 function joinTranscript(left, right) {
   const a = cleanTranscript(left);
   const b = cleanTranscript(right);
@@ -285,6 +303,7 @@ function makeTaskId() {
 module.exports = {
   createFunAsrRealtimeSession,
   joinTranscript,
+  parseRealtimeEvents,
   normalizeFunAsrRealtimeModel,
   FUN_ASR_REALTIME_MODEL,
   FUN_ASR_REALTIME_WS_URL

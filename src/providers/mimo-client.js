@@ -1,3 +1,5 @@
+const { parseChatCompletionBody } = require("./openai-compatible-client");
+
 function createMimoClient({ getSettings, cleanTranscript }) {
   function resolveApiKey() {
     const settings = getSettings();
@@ -50,8 +52,7 @@ function createMimoClient({ getSettings, cleanTranscript }) {
         throw new Error(`MiMo API ${response.status} at ${baseUrl}: ${bodyText}`);
       }
 
-      const body = JSON.parse(bodyText);
-      const message = body?.choices?.[0]?.message ?? {};
+      const { message } = parseChatCompletionBody(bodyText);
       return {
         content: String(message.content || "").trim(),
         reasoningContent: String(message.reasoning_content || "").trim()

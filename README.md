@@ -6,6 +6,12 @@ Open Voice Input is an Electron MVP for global dictation on Windows. It is not a
 
 Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
 
+## Recommended Setup
+
+The current project is best adapted to Xiaomi MiMo V2.5. If you are choosing the first-stage speech backend, the recommended option is MiMo V2.5 used as an ASR-like multimodal audio understanding model. The app also supports Qwen3-ASR and Fun-ASR, but the prompts, request flow, Token Plan handling, and fallback cleanup rules have been tuned most heavily around MiMo V2.5.
+
+For the second-stage text cleanup step, a small chat model is usually enough. GPT-5.4 mini or another low-cost OpenAI-compatible small model is a good fit for removing filler words, merging repeated fragments, and adding punctuation after the raw transcript has already been produced.
+
 ## Features
 
 - Global hotkey recording
@@ -87,14 +93,14 @@ Default global hotkey: `Ctrl+Alt+M`.
 
 ASR providers:
 
-- `MiMo`: multimodal audio understanding. Useful as a fallback, but not a dedicated ASR endpoint.
+- `MiMo`: multimodal audio understanding. It is not a dedicated ASR endpoint, but it is currently the best-adapted backend in this project and is the recommended first-stage ASR-like model, especially with MiMo V2.5.
 - `Qwen3-ASR`: dedicated ASR through DashScope-compatible configuration. Supports batch and realtime modes.
 - `Fun-ASR`: dedicated DashScope ASR. Realtime recording uses the WebSocket API. Batch URL transcription uses the REST API when a public audio URL is provided.
 
 Cleanup providers:
 
 - `MiMo`: text cleanup through MiMo chat.
-- `OpenAI-compatible`: text cleanup through any compatible chat endpoint.
+- `OpenAI-compatible`: text cleanup through any compatible chat endpoint. GPT-5.4 mini or another small model is recommended for this second step.
 
 ## Transcription Modes
 

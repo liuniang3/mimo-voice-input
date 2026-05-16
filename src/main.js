@@ -11,6 +11,7 @@ const APP_ICON_PATH = path.join(__dirname, "..", "assets", "mimo-icon.ico");
 const TRAY_ICON_PATH = path.join(__dirname, "..", "assets", "mimo-tray.png");
 const HOTKEY_HELPER_PATH = path.join(__dirname, "win-hotkey-helper.ps1");
 const APP_DISPLAY_NAME = "Open Voice Input";
+const STABLE_USER_DATA_DIR = "open-voice-input";
 const FALLBACK_TRAY_ICON_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 const WINDOW_SIZES = {
@@ -43,6 +44,8 @@ const DEFAULT_SETTINGS = {
   restoreClipboard: false,
   requestTimeoutMs: 60000
 };
+
+app.setPath("userData", path.join(app.getPath("appData"), STABLE_USER_DATA_DIR));
 
 let mainWindow;
 let settingsWindow;
@@ -84,12 +87,39 @@ function settingsPath() {
 }
 
 async function loadSettings() {
+  await migrateLegacyUserData();
   try {
     const raw = await fs.readFile(settingsPath(), "utf8");
     settings = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
     settings.restoreClipboard = false;
   } catch {
     settings = { ...DEFAULT_SETTINGS };
+  }
+}
+
+async function migrateLegacyUserData() {
+  const userDataPath = app.getPath("userData");
+  const targetSettingsPath = path.join(userDataPath, "settings.json");
+  try {
+    await fs.access(targetSettingsPath);
+    return;
+  } catch {
+    // Continue with best-effort migration from older product names.
+  }
+
+  const appDataPath = app.getPath("appData");
+  const legacyDirs = ["mimo-voice-input", "MiMo Voice Input", "基于小米 MiMo V2.5 的语音输入法"];
+  for (const dir of legacyDirs) {
+    const legacySettingsPath = path.join(appDataPath, dir, "settings.json");
+    try {
+      const raw = await fs.readFile(legacySettingsPath, "utf8");
+      await fs.mkdir(userDataPath, { recursive: true });
+      await fs.writeFile(targetSettingsPath, raw, "utf8");
+      logEvent("settings: migrated", legacySettingsPath);
+      return;
+    } catch {
+      // Try the next known legacy location.
+    }
   }
 }
 

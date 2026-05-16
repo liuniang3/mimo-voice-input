@@ -12,7 +12,9 @@ const QWEN_ASR_OPENAI_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode
 const QWEN_ASR_MODES = new Set(["batch", "realtime"]);
 
 function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) {
-  const mimoClient = createMimoClient({ getSettings, cleanTranscript });
+  let overrideSettings = null;
+  const readSettings = () => overrideSettings || getSettings();
+  const mimoClient = createMimoClient({ getSettings: readSettings, cleanTranscript });
   const qwenAsrClient = createOpenAiCompatibleClient({
     apiKey: resolveDashScopeAsrApiKey,
     baseUrl: resolveQwenAsrBaseUrl,
@@ -31,7 +33,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
       client: qwenAsrClient,
       cleanTranscript,
       getOptions: () => {
-        const settings = getSettings();
+        const settings = readSettings();
         return {
           enableItn: Boolean(settings.asrEnableItn),
           language: settings.asrLanguage || ""
@@ -47,7 +49,7 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
       cleanTranscript,
       onLog: logEvent,
       getOptions: () => {
-        const settings = getSettings();
+        const settings = readSettings();
         return {
           enableItn: Boolean(settings.asrEnableItn),
           enableSemanticPunctuation: normalizeQwenAsrMode(settings.asrMode) !== "realtime",
@@ -68,37 +70,39 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
     return mode === "fast" ? "fast" : "stable";
   }
 
-  async function transcribe({ audioDataUrl, pcm16Base64, shortContext, transcriptionMode }) {
-    const settings = getSettings();
-    const mode = normalizeTranscriptionMode(transcriptionMode || settings.transcriptionMode);
-    const asrProvider = resolveAsrProvider(settings);
-    const cleanerProvider = resolveCleanerProvider(settings);
-    logEvent?.("voice-pipeline: mode", `${mode} asr=${asrProvider.id}:${asrProvider.kind || "audio-chat"} cleaner=${cleanerProvider.id}`);
+  async function transcribe({ audioDataUrl, pcm16Base64, shortContext, transcriptionMode, settingsSnapshot }) {
+    return withSettingsSnapshot(settingsSnapshot, async () => {
+      const settings = readSettings();
+      const mode = normalizeTranscriptionMode(transcriptionMode || settings.transcriptionMode);
+      const asrProvider = resolveAsrProvider(settings);
+      const cleanerProvider = resolveCleanerProvider(settings);
+      logEvent?.("voice-pipeline: mode", `${mode} asr=${asrProvider.id}:${asrProvider.kind || "audio-chat"} cleaner=${cleanerProvider.id}`);
 
-    if (mode === "fast") {
-      const fastResult = await asrProvider.transcribeFast({ audioDataUrl, pcm16Base64, shortContext });
-      return cleanTranscript(fastResult.text);
-    }
+      if (mode === "fast") {
+        const fastResult = await asrProvider.transcribeFast({ audioDataUrl, pcm16Base64, shortContext });
+        return cleanTranscript(fastResult.text);
+      }
 
-    const rawResult = await asrProvider.transcribeRaw({ audioDataUrl, pcm16Base64, shortContext });
-    const rawTranscript = cleanTranscript(rawResult.text);
-    if (!rawTranscript) return "";
+      const rawResult = await asrProvider.transcribeRaw({ audioDataUrl, pcm16Base64, shortContext });
+      const rawTranscript = cleanTranscript(rawResult.text);
+      if (!rawTranscript) return "";
 
-    const cleanedResult = await cleanerProvider.clean({ rawText: rawTranscript, shortContext });
-    return cleanedResult.text || rawTranscript;
+      const cleanedResult = await cleanerProvider.clean({ rawText: rawTranscript, shortContext });
+      return cleanedResult.text || rawTranscript;
+    });
   }
 
   async function cleanText({ rawText, shortContext }) {
     const text = cleanTranscript(rawText);
     if (!text) return "";
-    const settings = getSettings();
+    const settings = readSettings();
     const cleanerProvider = resolveCleanerProvider(settings);
     const cleanedResult = await cleanerProvider.clean({ rawText: text, shortContext });
     return cleanedResult.text || text;
   }
 
   async function testConnection() {
-    const settings = getSettings();
+    const settings = readSettings();
     const asrProvider = resolveAsrProvider(settings);
     const cleanerProvider = resolveCleanerProvider(settings);
     const checks = [];
@@ -175,61 +179,72 @@ function createVoicePipeline({ getSettings, logEvent, providerOverrides = {} }) 
   }
 
   function resolveApiKey() {
-    const settings = getSettings();
+    const settings = readSettings();
     if (settings.asrProvider === "qwen3-asr" || settings.asrProvider === "fun-asr") return resolveDashScopeAsrApiKey();
     return mimoClient.resolveApiKey();
   }
 
   function resolveBaseUrl() {
-    const settings = getSettings();
+    const settings = readSettings();
     if (settings.asrProvider === "qwen3-asr") return qwenAsrClient.resolveBaseUrl();
     if (settings.asrProvider === "fun-asr") return resolveFunAsrBaseUrl();
     return mimoClient.resolveBaseUrl(mimoClient.resolveApiKey());
   }
 
   function resolveRequestTimeoutMs() {
-    return getSettings().requestTimeoutMs || 60000;
+    return readSettings().requestTimeoutMs || 60000;
   }
 
   function resolveDashScopeAsrApiKey() {
-    const settings = getSettings();
+    const settings = readSettings();
     return settings.asrApiKey || process.env.QWEN_ASR_API_KEY || process.env.DASHSCOPE_API_KEY || settings.apiKey || process.env.MIMO_API_KEY || "";
   }
 
   function resolveQwenAsrBaseUrl() {
-    const settings = getSettings();
+    const settings = readSettings();
     return normalizeBaseUrl(settings.asrBaseUrl || process.env.QWEN_ASR_BASE_URL || process.env.DASHSCOPE_BASE_URL, QWEN_ASR_OPENAI_BASE_URL);
   }
 
   function resolveQwenAsrModel() {
-    return normalizeQwenAsrModel(getSettings().asrModel);
+    return normalizeQwenAsrModel(readSettings().asrModel);
   }
 
   function resolveFunAsrBaseUrl() {
-    const settings = getSettings();
+    const settings = readSettings();
     return normalizeBaseUrl(settings.asrBaseUrl || process.env.FUN_ASR_BASE_URL || process.env.DASHSCOPE_BASE_URL, FUN_ASR_REST_BASE_URL);
   }
 
   function resolveFunAsrModel() {
-    return normalizeFunAsrModel(getSettings().asrModel);
+    return normalizeFunAsrModel(readSettings().asrModel);
   }
 
   function resolveFunAsrRealtimeModel() {
-    return getSettings().asrRealtimeModel || "fun-asr-realtime";
+    return readSettings().asrRealtimeModel || "fun-asr-realtime";
   }
 
   function resolveCleanerApiKey() {
-    const settings = getSettings();
+    const settings = readSettings();
     return settings.cleanerApiKey || process.env.CLEANER_API_KEY || settings.apiKey || process.env.MIMO_API_KEY || "";
   }
 
   function resolveCleanerBaseUrl() {
-    const settings = getSettings();
+    const settings = readSettings();
     return normalizeBaseUrl(settings.cleanerBaseUrl || process.env.CLEANER_BASE_URL, "https://api.openai.com/v1");
   }
 
   function resolveCleanerModel() {
-    return getSettings().cleanerModel || "gpt-5.4-mini";
+    return readSettings().cleanerModel || "gpt-5.4-mini";
+  }
+
+  async function withSettingsSnapshot(settingsSnapshot, action) {
+    if (!settingsSnapshot) return action();
+    const previous = overrideSettings;
+    overrideSettings = settingsSnapshot;
+    try {
+      return await action();
+    } finally {
+      overrideSettings = previous;
+    }
   }
 }
 

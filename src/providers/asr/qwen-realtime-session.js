@@ -1,5 +1,6 @@
 const WebSocket = require("ws");
 const { cleanTranscript } = require("../../transcript-cleaner");
+const { parseServerSentEventChunks } = require("../openai-compatible-client");
 
 const QWEN_REALTIME_MODEL = "qwen3-asr-flash-realtime";
 const QWEN_REALTIME_WS_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime";
@@ -112,14 +113,17 @@ function createQwenRealtimeSession({
   }
 
   function handleMessage(raw) {
-    let event;
-    try {
-      event = JSON.parse(raw);
-    } catch {
-      onLog?.("qwen-realtime: non-json", raw.slice(0, 200));
+    const events = parseRealtimeEvents(raw);
+    if (!events.length) {
       return;
     }
 
+    for (const event of events) {
+      handleEvent(event, raw);
+    }
+  }
+
+  function handleEvent(event, raw) {
     if (event.type === "error") {
       const message = event.error?.message || event.message || raw;
       onLog?.("qwen-realtime: server error", message);
@@ -215,6 +219,20 @@ function createQwenRealtimeSession({
   }
 }
 
+function parseRealtimeEvents(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return [];
+  try {
+    return [JSON.parse(text)];
+  } catch {
+    try {
+      return parseServerSentEventChunks(text);
+    } catch {
+      return [];
+    }
+  }
+}
+
 function joinTranscript(left, right) {
   const a = cleanTranscript(left);
   const b = cleanTranscript(right);
@@ -265,6 +283,7 @@ function isFinalEvent(event) {
 module.exports = {
   createQwenRealtimeSession,
   joinTranscript,
+  parseRealtimeEvents,
   normalizeQwenRealtimeModel,
   QWEN_REALTIME_MODEL,
   QWEN_REALTIME_WS_URL

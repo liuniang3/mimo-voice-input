@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
-const { createOpenAiCompatibleClient } = require("../src/providers/openai-compatible-client");
+const { createOpenAiCompatibleClient, parseChatCompletionBody } = require("../src/providers/openai-compatible-client");
 const { normalizeFunAsrModel } = require("../src/providers/asr/fun-asr-provider");
-const { normalizeFunAsrRealtimeModel } = require("../src/providers/asr/fun-asr-realtime-session");
-const { joinTranscript, normalizeQwenRealtimeModel } = require("../src/providers/asr/qwen-realtime-session");
+const { normalizeFunAsrRealtimeModel, parseRealtimeEvents: parseFunRealtimeEvents } = require("../src/providers/asr/fun-asr-realtime-session");
+const { joinTranscript, normalizeQwenRealtimeModel, parseRealtimeEvents: parseQwenRealtimeEvents } = require("../src/providers/asr/qwen-realtime-session");
 const { createVoicePipeline, normalizeQwenAsrMode, normalizeQwenAsrModel } = require("../src/providers/voice-pipeline");
 
 async function run() {
@@ -169,12 +169,74 @@ async function run() {
   assert.equal(funFastText, "fun fast");
   assert.deepEqual(calls.filter(([name]) => name !== "log"), [["fun-fast", "pcm-test"]]);
 
+  calls.length = 0;
+  let currentSettings = { asrProvider: "fun-asr", cleanerProvider: "mimo", transcriptionMode: "fast" };
+  const snapshotPipeline = createVoicePipeline({
+    getSettings: () => currentSettings,
+    logEvent: (message, detail) => calls.push(["log", message, detail]),
+    providerOverrides: {
+      asrProviders: {
+        mimo: {
+          id: "mimo",
+          transcribeFast: async () => {
+            calls.push(["mimo-fast"]);
+            return { text: "mimo snapshot" };
+          },
+          transcribeRaw: async () => {
+            calls.push(["mimo-raw"]);
+            return { text: "mimo raw" };
+          }
+        },
+        "fun-asr": {
+          id: "fun-asr",
+          transcribeFast: async () => {
+            throw new Error("current Fun-ASR provider should not be used for a snapshotted retry");
+          },
+          transcribeRaw: async () => {
+            throw new Error("current Fun-ASR provider should not be used for a snapshotted retry");
+          }
+        }
+      },
+      cleanerProviders: {
+        mimo: {
+          id: "mimo",
+          clean: async ({ rawText }) => ({ text: rawText })
+        }
+      }
+    }
+  });
+  const snapshottedRetryText = await snapshotPipeline.transcribe({
+    audioDataUrl: "data:audio/wav;base64,test",
+    transcriptionMode: "fast",
+    settingsSnapshot: { asrProvider: "mimo", cleanerProvider: "mimo", transcriptionMode: "fast" }
+  });
+  assert.equal(snapshottedRetryText, "mimo snapshot");
+  assert.deepEqual(calls.filter(([name]) => name !== "log"), [["mimo-fast"]]);
+
   const client = createOpenAiCompatibleClient({
     apiKey: "test",
     baseUrl: "https://example.com",
     model: "test-model"
   });
   assert.equal(client.resolveBaseUrl(), "https://example.com/v1");
+
+  const streamedBody = parseChatCompletionBody([
+    'data: {"id":"chatcmpl-test","choices":[{"delta":{"content":"你"}}]}',
+    "",
+    'data: {"id":"chatcmpl-test","choices":[{"delta":{"content":"好"}}]}',
+    "",
+    "data: [DONE]"
+  ].join("\n"));
+  assert.equal(streamedBody.message.content, "你好");
+
+  const normalBody = parseChatCompletionBody('{"choices":[{"message":{"content":"ok"}}]}');
+  assert.equal(normalBody.message.content, "ok");
+
+  const realtimeEvents = parseQwenRealtimeEvents('data: {"type":"response.text.delta","delta":"hi"}\n\ndata: [DONE]');
+  assert.equal(realtimeEvents.length, 1);
+  assert.equal(realtimeEvents[0].delta, "hi");
+  assert.equal(parseFunRealtimeEvents('data: {"header":{"event":"task-started"}}\n\n')[0].header.event, "task-started");
+
   assert.equal(normalizeQwenAsrModel(""), "qwen3-asr-flash");
   assert.equal(normalizeQwenAsrModel("mimo-v2.5"), "qwen3-asr-flash");
   assert.equal(normalizeQwenAsrModel("qwen3-asr-flash-realtime-2026-02-10"), "qwen3-asr-flash");
